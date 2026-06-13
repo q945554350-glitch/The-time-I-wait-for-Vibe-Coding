@@ -65,7 +65,7 @@
       time: Math.min(debugStartTime, GAME_DURATION - 1), kills: 0, spawnClock: 0, shake: 0, flash: 0,
       bossSpawned: false, bossDefeated: false, boss: null, activeBoss: null, bossIntro: 0,
       miniBossSpawned: miniBossSchedule.map(entry => debugStartTime >= entry.time), miniBossesDefeated: 0,
-      pendingUpgradeReasons: [], upgradeRefreshes: 0, currentUpgradePicks: [], currentUpgradeReason: "level",
+      pendingUpgradeReasons: [], upgradeRefreshes: 2, currentUpgradePicks: [], currentUpgradeReason: "level",
       enemies: [], bullets: [], hazards: [], particles: [], texts: [], pickups: [], stars: makeStars(),
       player: {
         x: width / 2, y: height / 2, r: 13, speed: 235, hp: 100, maxHp: 100,
@@ -315,7 +315,6 @@
   function showUpgrade(reason = "level") {
     state = "upgrade";
     game.currentUpgradeReason = reason;
-    game.upgradeRefreshes = 2;
     const isMiniBossReward = reason === "miniBoss";
     ui.upgradeKicker.textContent = isMiniBossReward ? "MINI BOSS REWARD" : "PROMPT EVOLUTION";
     ui.upgradeTitle.textContent = isMiniBossReward ? "问题已解决，额外强化一次。" : "这次迭代，强化什么？";
@@ -361,8 +360,8 @@
     const remaining = game.upgradeRefreshes;
     ui.refreshUpgrades.disabled = remaining <= 0;
     ui.refreshUpgrades.innerHTML = remaining > 0
-      ? `刷新选项（剩余 ${remaining} 次） <kbd>R</kbd>`
-      : "刷新次数已用完";
+      ? `本局刷新（剩余 ${remaining} 次） <kbd>R</kbd>`
+      : "本局刷新次数已用完";
   }
 
   function chooseUpgrade(upgrade) {
