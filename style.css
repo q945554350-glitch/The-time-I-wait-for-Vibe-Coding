@@ -160,6 +160,16 @@ kbd { color: var(--ink); font-family: inherit; font-weight: 800; }
 .upgrade-card h3 { margin: 20px 0 8px; font-size: 22px; }
 .upgrade-card p { margin: 0; color: #aeb3c2; line-height: 1.55; font-size: 13px; }
 .upgrade-card small { margin-top: 16px; color: var(--accent); font-weight: 800; }
+.refresh-upgrades {
+  margin-top: 18px; padding: 11px 18px;
+  border: 1px solid rgba(72,231,255,.32); border-radius: 999px;
+  background: rgba(72,231,255,.07); color: #bff8ff;
+  font-family: inherit; font-size: 12px; font-weight: 800; letter-spacing: .04em; cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, transform .15s ease, opacity .15s ease;
+}
+.refresh-upgrades:hover:not(:disabled) { transform: translateY(-2px); border-color: #48e7ff; background: rgba(72,231,255,.14); }
+.refresh-upgrades:disabled { opacity: .35; cursor: default; }
+.refresh-upgrades kbd { margin-left: 7px; color: #eef8ff; }
 
 .end-stats { display: flex; justify-content: center; gap: 12px; margin: 0 0 28px; }
 .end-stats div { min-width: 105px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.04); }

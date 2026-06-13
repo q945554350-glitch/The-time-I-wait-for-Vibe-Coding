@@ -13,7 +13,7 @@
     healthBar: $("#healthBar"), xpBar: $("#xpBar"), healthText: $("#healthText"), xpText: $("#xpText"),
     level: $("#levelText"), timer: $("#timerText"), wave: $("#waveText"), kills: $("#killText"),
     choices: $("#upgradeChoices"), build: $("#buildList"), sound: $("#soundButton"), pauseButton: $("#pauseButton"),
-    upgradeKicker: $("#upgradeKicker"), upgradeTitle: $("#upgradeTitle"),
+    upgradeKicker: $("#upgradeKicker"), upgradeTitle: $("#upgradeTitle"), refreshUpgrades: $("#refreshUpgradesButton"),
     bossHud: $("#bossHud"), bossBar: $("#bossHealthBar"), bossAlert: $("#bossAlert"),
     bossHudKicker: $("#bossHudKicker"), bossHudName: $("#bossHudName"),
     bossAlertKicker: $("#bossAlertKicker"), bossAlertName: $("#bossAlertName"), bossAlertQuote: $("#bossAlertQuote")
@@ -65,7 +65,7 @@
       time: Math.min(debugStartTime, GAME_DURATION - 1), kills: 0, spawnClock: 0, shake: 0, flash: 0,
       bossSpawned: false, bossDefeated: false, boss: null, activeBoss: null, bossIntro: 0,
       miniBossSpawned: miniBossSchedule.map(entry => debugStartTime >= entry.time), miniBossesDefeated: 0,
-      pendingUpgradeReasons: [],
+      pendingUpgradeReasons: [], upgradeRefreshes: 0, currentUpgradePicks: [], currentUpgradeReason: "level",
       enemies: [], bullets: [], hazards: [], particles: [], texts: [], pickups: [], stars: makeStars(),
       player: {
         x: width / 2, y: height / 2, r: 13, speed: 235, hp: 100, maxHp: 100,
@@ -314,10 +314,28 @@
 
   function showUpgrade(reason = "level") {
     state = "upgrade";
+    game.currentUpgradeReason = reason;
+    game.upgradeRefreshes = 2;
     const isMiniBossReward = reason === "miniBoss";
     ui.upgradeKicker.textContent = isMiniBossReward ? "MINI BOSS REWARD" : "PROMPT EVOLUTION";
     ui.upgradeTitle.textContent = isMiniBossReward ? "问题已解决，额外强化一次。" : "这次迭代，强化什么？";
-    const picks = [...upgrades].sort(() => Math.random() - .5).slice(0, 3);
+    renderUpgradeChoices(pickUpgrades());
+    updateRefreshButton();
+    ui.upgrade.classList.add("visible");
+    beep(523, .1, .04, "sine");
+    setTimeout(() => beep(784, .18, .03, "sine"), 85);
+  }
+
+  function pickUpgrades(excludedIds = []) {
+    const excluded = new Set(excludedIds);
+    const preferred = upgrades.filter(upgrade => !excluded.has(upgrade.id)).sort(() => Math.random() - .5);
+    const fallback = upgrades.filter(upgrade => excluded.has(upgrade.id)).sort(() => Math.random() - .5);
+    return [...preferred, ...fallback].slice(0, 3);
+  }
+
+  function renderUpgradeChoices(picks) {
+    const isMiniBossReward = game.currentUpgradeReason === "miniBoss";
+    game.currentUpgradePicks = picks.map(upgrade => upgrade.id);
     ui.choices.innerHTML = "";
     for (const upgrade of picks) {
       const count = game.player.upgrades[upgrade.id] || 0;
@@ -328,9 +346,23 @@
       button.addEventListener("click", () => chooseUpgrade(upgrade), { once: true });
       ui.choices.appendChild(button);
     }
-    ui.upgrade.classList.add("visible");
-    beep(523, .1, .04, "sine");
-    setTimeout(() => beep(784, .18, .03, "sine"), 85);
+  }
+
+  function refreshUpgradeChoices() {
+    if (state !== "upgrade" || game.upgradeRefreshes <= 0) return;
+    game.upgradeRefreshes -= 1;
+    renderUpgradeChoices(pickUpgrades(game.currentUpgradePicks));
+    updateRefreshButton();
+    beep(392, .07, .03, "triangle");
+    setTimeout(() => beep(587, .1, .025, "triangle"), 70);
+  }
+
+  function updateRefreshButton() {
+    const remaining = game.upgradeRefreshes;
+    ui.refreshUpgrades.disabled = remaining <= 0;
+    ui.refreshUpgrades.innerHTML = remaining > 0
+      ? `刷新选项（剩余 ${remaining} 次） <kbd>R</kbd>`
+      : "刷新次数已用完";
   }
 
   function chooseUpgrade(upgrade) {
@@ -878,8 +910,9 @@
   window.addEventListener("resize", resize);
   window.addEventListener("keydown", event => {
     const key = event.key.toLowerCase();
-    if (["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(key)) event.preventDefault();
-    if (key === " ") dash(); else if (key === "escape") togglePause(); else keys.add(key);
+    if (["w", "a", "s", "d", "r", "arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(key)) event.preventDefault();
+    if (key === "r" && state === "upgrade") refreshUpgradeChoices();
+    else if (key === " ") dash(); else if (key === "escape") togglePause(); else keys.add(key);
   });
   window.addEventListener("keyup", event => keys.delete(event.key.toLowerCase()));
   window.addEventListener("blur", () => { keys.clear(); if (state === "playing") togglePause(true); });
@@ -887,6 +920,7 @@
   $("#restartButton").addEventListener("click", startGame);
   $("#resumeButton").addEventListener("click", () => togglePause(false));
   ui.pauseButton.addEventListener("click", () => togglePause());
+  ui.refreshUpgrades.addEventListener("click", refreshUpgradeChoices);
   ui.sound.addEventListener("click", () => { soundOn = !soundOn; ui.sound.textContent = `声音：${soundOn ? "开" : "关"}`; if (soundOn) beep(440); });
 
   resize();
