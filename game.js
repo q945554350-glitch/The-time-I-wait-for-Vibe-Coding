@@ -51,17 +51,17 @@
 
   const enemyKinds = [
     { name: "语法报错", label: "报错", color: "#ff4fd8", hp: 14, speed: 55, size: 17, xp: 1 },
-    { name: "模型幻觉", label: "幻觉", color: "#a75bff", hp: 24, speed: 82, size: 17, xp: 2 },
-    { name: "需求漂移", label: "漂移", color: "#3f8cff", hp: 46, speed: 42, size: 18, xp: 3 },
-    { name: "上下文溢出", label: "溢出", color: "#ffe66d", hp: 80, speed: 32, size: 20, xp: 5 }
+    { name: "模型幻觉", label: "幻觉", color: "#a75bff", hp: 24, speed: 82, size: 17, xp: 2, ranged: { range: 255, rate: 2.9, speed: 165, damage: 7, shots: 1 } },
+    { name: "需求漂移", label: "漂移", color: "#3f8cff", hp: 46, speed: 52, size: 18, xp: 3, exploder: { trigger: 112, fuse: 1.1, radius: 122, damage: 18 } },
+    { name: "上下文溢出", label: "溢出", color: "#ffe66d", hp: 80, speed: 36, size: 20, xp: 5, ranged: { range: 290, rate: 3.5, speed: 145, damage: 9, shots: 3 } }
   ];
 
   const conflictKind = { name: "冲突标记", label: "冲突", color: "#ff4fd8", hp: 42, speed: 74, size: 18, xp: 3 };
   const miniBossSchedule = [
     { time: 45, kind: { name: "编译崩溃", label: "编译崩溃", color: "#ff4fd8", hp: enemyKinds[0].hp * 10, speed: 43, size: 27, xp: 8, isMiniBoss: true }, quote: "“这一处红字，想占满整个终端。”" },
-    { time: 105, kind: { name: "幻觉风暴", label: "幻觉风暴", color: "#a75bff", hp: enemyKinds[1].hp * 12, speed: 52, size: 29, xp: 10, isMiniBoss: true }, quote: "“说得越像真的，就越危险。”" },
+    { time: 105, kind: { name: "幻觉风暴", label: "幻觉风暴", color: "#a75bff", hp: enemyKinds[1].hp * 12, speed: 52, size: 29, xp: 10, isMiniBoss: true, ranged: { range: 280, rate: 2.2, speed: 175, damage: 9, shots: 5 } }, quote: "“说得越像真的，就越危险。”" },
     { time: 165, kind: { name: "需求失控", label: "需求失控", color: "#3f8cff", hp: enemyKinds[2].hp * 15, speed: 39, size: 31, xp: 12, isMiniBoss: true }, quote: "“再加一个功能，就一个。”" },
-    { time: 210, kind: { name: "上下文爆炸", label: "上下文爆炸", color: "#ffe66d", hp: enemyKinds[3].hp * 18, speed: 34, size: 34, xp: 15, isMiniBoss: true }, quote: "“窗口满了，但需求还在增长。”" }
+    { time: 210, kind: { name: "上下文爆炸", label: "上下文爆炸", color: "#ffe66d", hp: enemyKinds[3].hp * 18, speed: 34, size: 34, xp: 15, isMiniBoss: true, ranged: { range: 320, rate: 2.5, speed: 185, damage: 11, shots: 7 } }, quote: "“窗口满了，但需求还在增长。”" }
   ];
   const bossKind = { name: "合并冲突小姐", color: "#ff4fd8", hp: 3600, speed: 0, size: 54, xp: 30, isBoss: true };
   const bossTaunts = [
@@ -255,6 +255,13 @@
     lastTime = performance.now();
   }
 
+  function enemyHealthScale(time, isMiniBoss = false) {
+    const progress = Math.max(0, Math.min(1, time / GAME_DURATION));
+    return isMiniBoss
+      ? 1 + progress * 1.1 + progress * progress * .9
+      : 1 + progress * 1.35 + progress * progress * 1.65;
+  }
+
   function spawnEnemy(forcedKind = null, origin = null) {
     const progress = game.time / GAME_DURATION;
     const roll = Math.random();
@@ -270,17 +277,20 @@
     else if (side === 1) { x = width + margin; y = Math.random() * height; }
     else if (side === 2) { x = Math.random() * width; y = height + margin; }
     else { x = -margin; y = Math.random() * height; }
-    const scale = 1 + progress * .9;
+    const scale = enemyHealthScale(game.time, Boolean(kind.isMiniBoss));
     game.enemies.push({
       x, y, kind, r: kind.size, hp: kind.hp * scale, maxHp: kind.hp * scale,
-      speed: kind.speed * (1 + progress * .18), hit: 0, auraTick: 0, angle: Math.random() * TAU
+      speed: kind.speed * (1 + progress * .24), hit: 0, auraTick: 0, angle: Math.random() * TAU,
+      attackClock: kind.ranged ? .8 + Math.random() * kind.ranged.rate : 0,
+      strafe: Math.random() < .5 ? -1 : 1, fuse: 0, fuseMax: kind.exploder?.fuse || 0
     });
   }
 
   function spawnBoss() {
     game.bossSpawned = true;
     game.bossIntro = 3.2;
-    const hpScale = 1 + Math.max(0, game.player.level - 7) * .05;
+    const progress = Math.max(0, Math.min(1, game.time / GAME_DURATION));
+    const hpScale = 1 + progress * 1.15 + progress * progress * .75 + Math.max(0, game.player.level - 7) * .055;
     const boss = {
       x: width / 2, y: -80, kind: bossKind, r: bossKind.size,
       hp: bossKind.hp * hpScale, maxHp: bossKind.hp * hpScale,
@@ -306,12 +316,14 @@
   function spawnMiniBoss(scheduleIndex) {
     const entry = miniBossSchedule[scheduleIndex];
     game.miniBossSpawned[scheduleIndex] = true;
-    const progressScale = 1 + game.time / GAME_DURATION * .9;
+    const progressScale = enemyHealthScale(game.time, true);
     const kind = entry.kind;
     const miniBoss = {
       x: width / 2, y: -50, kind, r: kind.size,
       hp: kind.hp * progressScale, maxHp: kind.hp * progressScale,
-      speed: kind.speed, hit: 0, auraTick: 0, angle: 0, scheduleIndex
+      speed: kind.speed, hit: 0, auraTick: 0, angle: 0, scheduleIndex,
+      attackClock: kind.ranged ? .8 + Math.random() * kind.ranged.rate : 0,
+      strafe: Math.random() < .5 ? -1 : 1, fuse: 0, fuseMax: 0
     };
     game.activeBoss = miniBoss;
     game.enemies.push(miniBoss);
@@ -585,6 +597,40 @@
     game.hazards.push({ x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, r: radius, damage, color, life: 5, spin: Math.random() * TAU });
   }
 
+  function fireEnemyVolley(enemy, player) {
+    const ranged = enemy.kind.ranged;
+    const progress = game.time / GAME_DURATION;
+    const extraShots = progress >= .72 && !enemy.kind.isMiniBoss ? 2 : 0;
+    const count = ranged.shots + extraShots;
+    const base = Math.atan2(player.y - enemy.y, player.x - enemy.x);
+    const spread = count > 1 ? .17 : 0;
+    for (let i = 0; i < count; i++) {
+      const offset = (i - (count - 1) / 2) * spread;
+      createHazard(enemy.x, enemy.y, base + offset, ranged.speed * (1 + progress * .12), enemy.kind.color, enemy.kind.isMiniBoss ? 7 : 5.5, ranged.damage);
+    }
+    burst(enemy.x, enemy.y, enemy.kind.color, enemy.kind.isMiniBoss ? 10 : 5, 90);
+    beep(enemy.kind.isMiniBoss ? 125 : 190, .06, .018, "square");
+  }
+
+  function detonateEnemy(enemy, player) {
+    const index = game.enemies.indexOf(enemy);
+    if (index < 0) return;
+    game.enemies.splice(index, 1);
+    const blast = enemy.kind.exploder;
+    const progress = game.time / GAME_DURATION;
+    const ringCount = 8 + Math.floor(progress * 6);
+    for (let i = 0; i < ringCount; i++) {
+      createHazard(enemy.x, enemy.y, i / ringCount * TAU, 135 + progress * 45, enemy.kind.color, 5.5, 7 + progress * 4);
+    }
+    if (Math.hypot(player.x - enemy.x, player.y - enemy.y) < blast.radius + player.r) {
+      damagePlayer(blast.damage + progress * 8, enemy.x, enemy.y);
+    }
+    game.texts.push({ x: enemy.x, y: enemy.y - 26, text: "需求自爆", color: "#d8ecff", life: 1, glow: enemy.kind.color, font: "900 13px sans-serif" });
+    burst(enemy.x, enemy.y, enemy.kind.color, 28, 280);
+    game.shake = Math.max(game.shake, 14);
+    beep(72, .2, .06, "sawtooth");
+  }
+
   function fireBossFan(boss, player) {
     const phaseTwo = boss.hp < boss.maxHp * .5;
     const count = phaseTwo ? 9 : 7;
@@ -759,15 +805,49 @@
         continue;
       }
       const ex = p.x - enemy.x, ey = p.y - enemy.y, distance = Math.hypot(ex, ey) || 1;
-      enemy.x += ex / distance * enemy.speed * worldDt;
-      enemy.y += ey / distance * enemy.speed * worldDt;
+      const ranged = enemy.kind.ranged;
+      let moveX = ex / distance, moveY = ey / distance;
+      if (ranged && distance < ranged.range) {
+        if (distance < ranged.range * .68) {
+          moveX *= -1;
+          moveY *= -1;
+        } else {
+          moveX = -ey / distance * enemy.strafe;
+          moveY = ex / distance * enemy.strafe;
+        }
+      }
+      const fuseSlow = enemy.fuse > 0 ? .22 : 1;
+      enemy.x += moveX * enemy.speed * fuseSlow * worldDt;
+      enemy.y += moveY * enemy.speed * fuseSlow * worldDt;
       enemy.angle += worldDt;
       enemy.hit = Math.max(0, enemy.hit - worldDt);
       enemy.auraTick -= worldDt;
+      if (ranged) {
+        enemy.attackClock -= worldDt;
+        if (enemy.attackClock <= 0 && distance < ranged.range * 1.45) {
+          enemy.attackClock = ranged.rate * (.9 + Math.random() * .22);
+          fireEnemyVolley(enemy, p);
+        }
+      }
+      if (enemy.kind.exploder) {
+        if (enemy.fuse > 0) {
+          enemy.fuse -= worldDt;
+          if (enemy.fuse <= 0) {
+            detonateEnemy(enemy, p);
+            continue;
+          }
+        } else if (distance < enemy.kind.exploder.trigger) {
+          enemy.fuse = enemy.kind.exploder.fuse;
+          enemy.fuseMax = enemy.fuse;
+          game.texts.push({ x: enemy.x, y: enemy.y - 30, text: "自爆倒计时", color: "#ffe66d", life: .8, glow: enemy.kind.color, font: "900 11px sans-serif" });
+          beep(260, .08, .03, "square");
+        }
+      }
       if (distance < p.aura + enemy.r && enemy.auraTick <= 0) {
         enemy.auraTick = .42;
         applyAuraDamage(enemy, p);
       }
+      if (!game.enemies.includes(enemy)) continue;
       if (distance < p.r + enemy.r && p.invincible <= 0) {
         damagePlayer(8 + enemy.kind.xp * 1.5, enemy.x, enemy.y);
         enemy.x -= ex / distance * 24; enemy.y -= ey / distance * 24;
@@ -986,6 +1066,20 @@
         ctx.stroke();
         ctx.globalAlpha = 1;
       }
+      if (enemy.fuse > 0) {
+        const fuseProgress = 1 - enemy.fuse / enemy.fuseMax;
+        ctx.globalAlpha = .35 + Math.sin(game.time * 22) * .16;
+        ctx.fillStyle = enemy.kind.color;
+        ctx.beginPath();
+        ctx.arc(0, 0, enemy.r + 8 + fuseProgress * 12, 0, TAU);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = "#ffe66d";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, enemy.r + 13, -.5 * Math.PI, (-.5 + fuseProgress * 2) * Math.PI);
+        ctx.stroke();
+      }
       ctx.shadowBlur = enemy.hit > 0 ? 20 : enemy.kind.isMiniBoss ? 18 : 10;
       ctx.shadowColor = enemy.hit > 0 ? "#ffffff" : enemy.kind.color;
       ctx.fillStyle = "rgba(7, 10, 22, .9)";
@@ -1004,10 +1098,11 @@
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(label, 0, .5);
-      if (enemy.kind.isMiniBoss) {
+      if (enemy.kind.isMiniBoss || enemy.kind.ranged || enemy.kind.exploder) {
         ctx.font = "800 7px ui-monospace, monospace";
         ctx.fillStyle = enemy.kind.color;
-        ctx.fillText("MINI BOSS", 0, -badgeHeight / 2 - 7);
+        const trait = enemy.fuse > 0 ? "SELF DESTRUCT" : enemy.kind.isMiniBoss ? `MINI BOSS${enemy.kind.ranged ? " · 弹幕" : ""}` : enemy.kind.ranged ? "弹幕" : "自爆";
+        ctx.fillText(trait, 0, -badgeHeight / 2 - 7);
       }
       ctx.restore();
       if (enemy.hp < enemy.maxHp) {
