@@ -56,14 +56,14 @@
     { name: "上下文溢出", label: "溢出", color: "#ffe66d", hp: 80, speed: 36, size: 20, xp: 5, ranged: { range: 290, rate: 3.5, speed: 145, damage: 9, shots: 3 } }
   ];
 
-  const conflictKind = { name: "冲突标记", label: "冲突", color: "#ff4fd8", hp: 42, speed: 74, size: 18, xp: 3 };
+  const conflictKind = { name: "冲突标记", label: "冲突", color: "#ff4fd8", hp: 42, speed: 74, size: 18, xp: 3, ranged: { range: 250, rate: 2.4, speed: 190, damage: 8, shots: 3 } };
   const miniBossSchedule = [
     { time: 45, kind: { name: "编译崩溃", label: "编译崩溃", color: "#ff4fd8", hp: enemyKinds[0].hp * 10, speed: 43, size: 27, xp: 8, isMiniBoss: true }, quote: "“这一处红字，想占满整个终端。”" },
     { time: 105, kind: { name: "幻觉风暴", label: "幻觉风暴", color: "#a75bff", hp: enemyKinds[1].hp * 12, speed: 52, size: 29, xp: 10, isMiniBoss: true, ranged: { range: 280, rate: 2.2, speed: 175, damage: 9, shots: 5 } }, quote: "“说得越像真的，就越危险。”" },
     { time: 165, kind: { name: "需求失控", label: "需求失控", color: "#3f8cff", hp: enemyKinds[2].hp * 15, speed: 39, size: 31, xp: 12, isMiniBoss: true }, quote: "“再加一个功能，就一个。”" },
     { time: 210, kind: { name: "上下文爆炸", label: "上下文爆炸", color: "#ffe66d", hp: enemyKinds[3].hp * 18, speed: 34, size: 34, xp: 15, isMiniBoss: true, ranged: { range: 320, rate: 2.5, speed: 185, damage: 11, shots: 7 } }, quote: "“窗口满了，但需求还在增长。”" }
   ];
-  const bossKind = { name: "合并冲突小姐", color: "#ff4fd8", hp: 3600, speed: 0, size: 54, xp: 30, isBoss: true };
+  const bossKind = { name: "合并冲突小姐", color: "#ff4fd8", hp: 4000, speed: 0, size: 54, xp: 30, isBoss: true };
   const bossTaunts = [
     "这个需求昨天不是这样的。",
     "两个版本在我这里都能运行。",
@@ -91,7 +91,7 @@
 
   function freshGame() {
     return {
-      time: Math.min(debugStartTime, GAME_DURATION - 1), kills: 0, spawnClock: 0, shake: 0, flash: 0,
+      time: Math.min(debugStartTime, GAME_DURATION - 1), kills: 0, spawnClock: 0, pressureClock: 18, shake: 0, flash: 0,
       bossSpawned: false, bossDefeated: false, boss: null, activeBoss: null, bossIntro: 0,
       miniBossSpawned: miniBossSchedule.map(entry => debugStartTime >= entry.time), miniBossesDefeated: 0,
       pendingUpgradeReasons: [], upgradeRefreshes: 2, refreshesUsed: 0, currentUpgradePicks: [], currentUpgradeReason: "level",
@@ -259,13 +259,16 @@
     const progress = Math.max(0, Math.min(1, time / GAME_DURATION));
     return isMiniBoss
       ? 1 + progress * 1.1 + progress * progress * .9
-      : 1 + progress * 1.35 + progress * progress * 1.65;
+      : 1 + progress * 1.5 + progress * progress * 2;
   }
 
   function spawnEnemy(forcedKind = null, origin = null) {
     const progress = game.time / GAME_DURATION;
     const roll = Math.random();
-    let index = roll < .52 ? 0 : roll < .79 ? 1 : roll < .94 ? 2 : 3;
+    const basicCutoff = Math.max(.28, .52 - progress * .24);
+    const hallucinationCutoff = Math.max(.6, .79 - progress * .13);
+    const driftCutoff = Math.max(.82, .94 - progress * .09);
+    let index = roll < basicCutoff ? 0 : roll < hallucinationCutoff ? 1 : roll < driftCutoff ? 2 : 3;
     if (game.time < 35) index = Math.min(index, 1);
     if (game.time < 80) index = Math.min(index, 2);
     const kind = forcedKind || enemyKinds[index];
@@ -277,12 +280,14 @@
     else if (side === 1) { x = width + margin; y = Math.random() * height; }
     else if (side === 2) { x = Math.random() * width; y = height + margin; }
     else { x = -margin; y = Math.random() * height; }
-    const scale = enemyHealthScale(game.time, Boolean(kind.isMiniBoss));
+    const elite = !forcedKind && game.time >= 120 && Math.random() < .06 + progress * .2;
+    const scale = enemyHealthScale(game.time, Boolean(kind.isMiniBoss)) * (elite ? 1.8 : 1);
     game.enemies.push({
-      x, y, kind, r: kind.size, hp: kind.hp * scale, maxHp: kind.hp * scale,
-      speed: kind.speed * (1 + progress * .24), hit: 0, auraTick: 0, angle: Math.random() * TAU,
+      x, y, kind, r: kind.size + (elite ? 3 : 0), hp: kind.hp * scale, maxHp: kind.hp * scale,
+      speed: kind.speed * (1 + progress * .28) * (elite ? 1.12 : 1), hit: 0, auraTick: 0, angle: Math.random() * TAU,
       attackClock: kind.ranged ? .8 + Math.random() * kind.ranged.rate : 0,
-      strafe: Math.random() < .5 ? -1 : 1, fuse: 0, fuseMax: kind.exploder?.fuse || 0
+      strafe: Math.random() < .5 ? -1 : 1, fuse: 0, fuseMax: kind.exploder?.fuse || 0,
+      elite, tokenBonus: elite ? Math.max(1, Math.ceil(kind.xp * .75)) : 0, contactBonus: elite ? 5 : 0
     });
   }
 
@@ -290,7 +295,7 @@
     game.bossSpawned = true;
     game.bossIntro = 3.2;
     const progress = Math.max(0, Math.min(1, game.time / GAME_DURATION));
-    const hpScale = 1 + progress * 1.15 + progress * progress * .75 + Math.max(0, game.player.level - 7) * .055;
+    const hpScale = 1 + progress * 1.2 + progress * progress * .85 + Math.max(0, game.player.level - 7) * .065;
     const boss = {
       x: width / 2, y: -80, kind: bossKind, r: bossKind.size,
       hp: bossKind.hp * hpScale, maxHp: bossKind.hp * hpScale,
@@ -483,7 +488,7 @@
       }
     }
     burst(enemy.x, enemy.y, enemy.kind.color, 12, 170);
-    const tokenValue = enemy.kind.xp + comboTokenBonus();
+    const tokenValue = enemy.kind.xp + (enemy.tokenBonus || 0) + comboTokenBonus();
     game.pickups.push({ x: enemy.x, y: enemy.y, value: tokenValue, r: 4 + tokenValue * .35, life: 12 });
     if (enemy.kind.xp >= 5 && !enemy.kind.isBoss) { game.shake = 7; beep(95, .12, .05, "sawtooth"); }
   }
@@ -625,6 +630,14 @@
     if (Math.hypot(player.x - enemy.x, player.y - enemy.y) < blast.radius + player.r) {
       damagePlayer(blast.damage + progress * 8, enemy.x, enemy.y);
     }
+    for (const nearby of game.enemies) {
+      if (!nearby.kind.exploder || nearby.fuse > 0) continue;
+      if (Math.hypot(nearby.x - enemy.x, nearby.y - enemy.y) < 190) {
+        nearby.fuse = .42 + Math.random() * .28;
+        nearby.fuseMax = nearby.fuse;
+        game.texts.push({ x: nearby.x, y: nearby.y - 28, text: "连锁自爆", color: "#ffe66d", life: .75, glow: nearby.kind.color, font: "900 10px sans-serif" });
+      }
+    }
     game.texts.push({ x: enemy.x, y: enemy.y - 26, text: "需求自爆", color: "#d8ecff", life: 1, glow: enemy.kind.color, font: "900 13px sans-serif" });
     burst(enemy.x, enemy.y, enemy.kind.color, 28, 280);
     game.shake = Math.max(game.shake, 14);
@@ -632,21 +645,26 @@
   }
 
   function fireBossFan(boss, player) {
-    const phaseTwo = boss.hp < boss.maxHp * .5;
-    const count = phaseTwo ? 9 : 7;
+    const healthRatio = boss.hp / boss.maxHp;
+    const phaseThree = healthRatio < .3;
+    const phaseTwo = healthRatio < .62;
+    const count = phaseThree ? 13 : phaseTwo ? 9 : 7;
     const base = Math.atan2(player.y - boss.y, player.x - boss.x);
     for (let i = 0; i < count; i++) {
-      const offset = (i - (count - 1) / 2) * .16;
-      createHazard(boss.x, boss.y + 28, base + offset, phaseTwo ? 245 : 215, i % 2 ? "#48e7ff" : "#ff4fd8", phaseTwo ? 7 : 6, 9);
+      const offset = (i - (count - 1) / 2) * (phaseThree ? .13 : .16);
+      createHazard(boss.x, boss.y + 28, base + offset, phaseThree ? 275 : phaseTwo ? 245 : 215, i % 2 ? "#48e7ff" : "#ff4fd8", phaseThree ? 7.5 : phaseTwo ? 7 : 6, phaseThree ? 12 : phaseTwo ? 10 : 9);
     }
     beep(155, .08, .025, "square");
   }
 
   function fireConflictRing(boss) {
-    const count = boss.hp < boss.maxHp * .5 ? 22 : 16;
+    const healthRatio = boss.hp / boss.maxHp;
+    const phaseThree = healthRatio < .3;
+    const phaseTwo = healthRatio < .62;
+    const count = phaseThree ? 28 : phaseTwo ? 22 : 16;
     const offset = game.time * .7;
     for (let i = 0; i < count; i++) {
-      createHazard(boss.x, boss.y, offset + i / count * TAU, 150, i % 2 ? "#48e7ff" : "#ff4fd8", 7, 11);
+      createHazard(boss.x, boss.y, offset + i / count * TAU, phaseThree ? 190 : phaseTwo ? 170 : 150, i % 2 ? "#48e7ff" : "#ff4fd8", phaseThree ? 7.5 : 7, phaseThree ? 14 : 11);
     }
     game.shake = 9;
     burst(boss.x, boss.y, "#eef8ff", 16, 190);
@@ -684,17 +702,21 @@
     boss.burstClock -= dt;
     boss.summonClock -= dt;
     boss.tauntClock -= dt;
+    const healthRatio = boss.hp / boss.maxHp;
+    const phaseThree = healthRatio < .3;
+    const phaseTwo = healthRatio < .62;
     if (boss.attackClock <= 0) {
-      boss.attackClock = boss.hp < boss.maxHp * .5 ? .72 : 1.08;
+      boss.attackClock = phaseThree ? .48 : phaseTwo ? .72 : 1.08;
       fireBossFan(boss, player);
     }
     if (boss.burstClock <= 0) {
-      boss.burstClock = boss.hp < boss.maxHp * .5 ? 3.4 : 4.8;
+      boss.burstClock = phaseThree ? 2.6 : phaseTwo ? 3.4 : 4.8;
       fireConflictRing(boss);
     }
     if (boss.summonClock <= 0) {
-      boss.summonClock = 6.4;
-      for (let i = 0; i < 3; i++) spawnEnemy(conflictKind, boss);
+      boss.summonClock = phaseThree ? 4.2 : phaseTwo ? 5.2 : 6.4;
+      const summonCount = phaseThree ? 5 : phaseTwo ? 4 : 3;
+      for (let i = 0; i < summonCount; i++) spawnEnemy(conflictKind, boss);
       game.texts.push({ x: boss.x, y: boss.y + 78, text: "<<<<<<< HEAD", color: "#ff4fd8", life: 1.2 });
     }
     if (boss.tauntClock <= 0) {
@@ -751,12 +773,25 @@
     game.bossIntro = Math.max(0, game.bossIntro - worldDt);
     game.spawnClock -= worldDt;
     const finalMinute = game.time >= BOSS_TIME;
-    const interval = Math.max(finalMinute ? .12 : .16, .78 - game.time * .0018);
+    const interval = Math.max(finalMinute ? .16 : .2, .76 - game.time * .00205);
     if (game.spawnClock <= 0) {
       game.spawnClock = interval;
       spawnEnemy();
-      if (game.time > 150 && Math.random() < .32) spawnEnemy();
-      if (finalMinute && Math.random() < .48) spawnEnemy();
+      if (game.time > 120 && Math.random() < .38) spawnEnemy();
+      if (game.time > 200 && Math.random() < .35) spawnEnemy();
+      if (finalMinute && Math.random() < .55) spawnEnemy();
+    }
+    if (game.time >= 120) {
+      game.pressureClock -= worldDt;
+      if (game.pressureClock <= 0) {
+        const progress = game.time / GAME_DURATION;
+        const reinforcements = 3 + Math.floor(progress * 4);
+        game.pressureClock = finalMinute ? 14 : 20 - progress * 5;
+        for (let i = 0; i < reinforcements; i++) spawnEnemy();
+        game.texts.push({ x: width / 2, y: height * .34, text: `问题堆积 +${reinforcements}`, color: "#ff86eb", life: 1.4, glow: "#ff4fd8", font: "900 17px sans-serif", rise: 8 });
+        game.shake = Math.max(game.shake, 7);
+        beep(105, .18, .045, "sawtooth");
+      }
     }
 
     let dx = 0, dy = 0;
@@ -825,7 +860,8 @@
       if (ranged) {
         enemy.attackClock -= worldDt;
         if (enemy.attackClock <= 0 && distance < ranged.range * 1.45) {
-          enemy.attackClock = ranged.rate * (.9 + Math.random() * .22);
+          const pressureRate = Math.max(.58, 1 - game.time / GAME_DURATION * .4);
+          enemy.attackClock = ranged.rate * pressureRate * (.9 + Math.random() * .22) * (enemy.elite ? .72 : 1);
           fireEnemyVolley(enemy, p);
         }
       }
@@ -849,7 +885,7 @@
       }
       if (!game.enemies.includes(enemy)) continue;
       if (distance < p.r + enemy.r && p.invincible <= 0) {
-        damagePlayer(8 + enemy.kind.xp * 1.5, enemy.x, enemy.y);
+        damagePlayer(8 + enemy.kind.xp * 1.5 + game.time / GAME_DURATION * 5 + (enemy.contactBonus || 0), enemy.x, enemy.y);
         enemy.x -= ex / distance * 24; enemy.y -= ey / distance * 24;
       }
     }
@@ -1080,11 +1116,11 @@
         ctx.arc(0, 0, enemy.r + 13, -.5 * Math.PI, (-.5 + fuseProgress * 2) * Math.PI);
         ctx.stroke();
       }
-      ctx.shadowBlur = enemy.hit > 0 ? 20 : enemy.kind.isMiniBoss ? 18 : 10;
-      ctx.shadowColor = enemy.hit > 0 ? "#ffffff" : enemy.kind.color;
+      ctx.shadowBlur = enemy.hit > 0 ? 20 : enemy.kind.isMiniBoss || enemy.elite ? 18 : 10;
+      ctx.shadowColor = enemy.hit > 0 ? "#ffffff" : enemy.elite ? "#ffe66d" : enemy.kind.color;
       ctx.fillStyle = "rgba(7, 10, 22, .9)";
-      ctx.strokeStyle = enemy.hit > 0 ? "#ffffff" : enemy.kind.color;
-      ctx.lineWidth = enemy.kind.isMiniBoss ? 2.5 : 1.5;
+      ctx.strokeStyle = enemy.hit > 0 ? "#ffffff" : enemy.elite ? "#ffe66d" : enemy.kind.color;
+      ctx.lineWidth = enemy.kind.isMiniBoss ? 2.5 : enemy.elite ? 2 : 1.5;
       roundedRectPath(ctx, -badgeWidth / 2, -badgeHeight / 2, badgeWidth, badgeHeight, 7);
       ctx.fill(); ctx.stroke();
       ctx.globalAlpha = .2;
@@ -1098,10 +1134,11 @@
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(label, 0, .5);
-      if (enemy.kind.isMiniBoss || enemy.kind.ranged || enemy.kind.exploder) {
+      if (enemy.kind.isMiniBoss || enemy.kind.ranged || enemy.kind.exploder || enemy.elite) {
         ctx.font = "800 7px ui-monospace, monospace";
-        ctx.fillStyle = enemy.kind.color;
-        const trait = enemy.fuse > 0 ? "SELF DESTRUCT" : enemy.kind.isMiniBoss ? `MINI BOSS${enemy.kind.ranged ? " · 弹幕" : ""}` : enemy.kind.ranged ? "弹幕" : "自爆";
+        ctx.fillStyle = enemy.elite ? "#ffe66d" : enemy.kind.color;
+        const baseTrait = enemy.kind.isMiniBoss ? `MINI BOSS${enemy.kind.ranged ? " · 弹幕" : ""}` : enemy.kind.ranged ? "弹幕" : enemy.kind.exploder ? "自爆" : "";
+        const trait = enemy.fuse > 0 ? "SELF DESTRUCT" : `${enemy.elite ? "精英" : ""}${enemy.elite && baseTrait ? " · " : ""}${baseTrait}`;
         ctx.fillText(trait, 0, -badgeHeight / 2 - 7);
       }
       ctx.restore();
