@@ -15,6 +15,7 @@
           <h1>我等待 Vibe Coding 的时间</h1>
         </div>
         <div class="top-actions">
+          <button id="achievementButton" class="icon-button achievement-button" type="button">成就 <b id="achievementCount">0/12</b></button>
           <button id="soundButton" class="icon-button" type="button" aria-label="切换声音">声音：开</button>
           <button id="pauseButton" class="icon-button" type="button">暂停</button>
         </div>
@@ -64,6 +65,13 @@
           <p id="bossAlertQuote">“两个版本，都想活下来。”</p>
         </div>
 
+        <div id="achievementToast" class="achievement-toast" aria-live="polite">
+          <div id="achievementToastIcon" class="achievement-toast-icon">✦</div>
+          <span>ACHIEVEMENT UNLOCKED</span>
+          <strong id="achievementToastName">成就解锁</strong>
+          <small id="achievementToastDesc"></small>
+        </div>
+
         <div id="startScreen" class="overlay visible">
           <div class="start-card">
             <p class="kicker">代码正在另一边生长。</p>
@@ -104,6 +112,20 @@
             <div id="endStats" class="end-stats"></div>
             <button id="restartButton" class="primary-button" type="button">再等一次</button>
           </div>
+        </div>
+
+        <div id="achievementScreen" class="overlay achievement-screen">
+          <section class="achievement-panel">
+            <div class="achievement-header">
+              <div>
+                <p class="kicker">PERMANENT RECORDS</p>
+                <h2>成就档案</h2>
+                <p class="achievement-note">解锁记录会永久保存在当前浏览器中。</p>
+              </div>
+              <button id="closeAchievements" class="icon-button" type="button">关闭</button>
+            </div>
+            <div id="achievementGrid" class="achievement-grid"></div>
+          </section>
         </div>
       </section>
 

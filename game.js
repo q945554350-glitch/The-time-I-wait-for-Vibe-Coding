@@ -14,6 +14,10 @@
     level: $("#levelText"), timer: $("#timerText"), wave: $("#waveText"), kills: $("#killText"),
     comboHud: $("#comboHud"), comboText: $("#comboText"), comboBonus: $("#comboBonus"),
     choices: $("#upgradeChoices"), build: $("#buildList"), sound: $("#soundButton"), pauseButton: $("#pauseButton"),
+    achievementButton: $("#achievementButton"), achievementCount: $("#achievementCount"),
+    achievementScreen: $("#achievementScreen"), achievementGrid: $("#achievementGrid"), closeAchievements: $("#closeAchievements"),
+    achievementToast: $("#achievementToast"), achievementToastIcon: $("#achievementToastIcon"),
+    achievementToastName: $("#achievementToastName"), achievementToastDesc: $("#achievementToastDesc"),
     upgradeKicker: $("#upgradeKicker"), upgradeTitle: $("#upgradeTitle"), refreshUpgrades: $("#refreshUpgradesButton"),
     bossHud: $("#bossHud"), bossBar: $("#bossHealthBar"), bossAlert: $("#bossAlert"),
     bossHudKicker: $("#bossHudKicker"), bossHudName: $("#bossHudName"),
@@ -60,14 +64,34 @@
     { time: 210, kind: { name: "上下文爆炸", label: "上下文爆炸", color: "#ffe66d", hp: enemyKinds[3].hp * 18, speed: 34, size: 34, xp: 15, isMiniBoss: true }, quote: "“窗口满了，但需求还在增长。”" }
   ];
   const bossKind = { name: "合并冲突小姐", color: "#ff4fd8", hp: 3600, speed: 0, size: 54, xp: 30, isBoss: true };
+  const achievementDefinitions = [
+    { id: "perfect_5", icon: "⌁", name: "漂亮撤回", desc: "单局触发 5 次完美闪避。", category: "操作", color: "#55f2ff" },
+    { id: "flawless", icon: "✓", name: "零冲突提交", desc: "五分钟内不受到任何伤害。", category: "挑战", color: "#7affb5" },
+    { id: "combo_50", icon: "50", name: "思路正热", desc: "单局达到 50 Combo。", category: "战斗", color: "#ff9c66" },
+    { id: "combo_100", icon: "100", name: "停不下来了", desc: "单局达到 100 Combo。", category: "战斗", color: "#ff668f" },
+    { id: "solve_200", icon: "200", name: "问题终结者", desc: "单局解决 200 个问题。", category: "战斗", color: "#d974ff" },
+    { id: "boss_clear", icon: "◆", name: "准时交付", desc: "击败合并冲突小姐。", category: "战斗", color: "#ff4fd8" },
+    { id: "synergy_context", icon: "◉", name: "上下文工程师", desc: "激活「上下文审查」联动。", category: "构筑", color: "#62a7ff" },
+    { id: "synergy_flood", icon: "↯", name: "提示词轰炸", desc: "激活「提示词洪流」联动。", category: "构筑", color: "#ffcf5a" },
+    { id: "synergy_coffee", icon: "≈", name: "咖啡永动机", desc: "激活「咖啡自动续杯」联动。", category: "构筑", color: "#bc8cff" },
+    { id: "all_synergies", icon: "✦", name: "全都要", desc: "单局同时激活三个联动。", category: "构筑", color: "#ffffff" },
+    { id: "no_refresh", icon: "R0", name: "不改也能跑", desc: "不使用刷新完成一局。", category: "挑战", color: "#75e6b5" },
+    { id: "retry_4", icon: "×4", name: "再试亿次", desc: "单局将「再试一次」升级到 4 层。", category: "构筑", color: "#69d9ff" }
+  ];
+  const achievementStorageKey = "vibe-wait-achievements-v1";
+  let achievementState = loadAchievementState();
+  let achievementToastQueue = [];
+  let achievementToastTimer = null;
+  let achievementReturnState = "start";
 
   function freshGame() {
     return {
       time: Math.min(debugStartTime, GAME_DURATION - 1), kills: 0, spawnClock: 0, shake: 0, flash: 0,
       bossSpawned: false, bossDefeated: false, boss: null, activeBoss: null, bossIntro: 0,
       miniBossSpawned: miniBossSchedule.map(entry => debugStartTime >= entry.time), miniBossesDefeated: 0,
-      pendingUpgradeReasons: [], upgradeRefreshes: 2, currentUpgradePicks: [], currentUpgradeReason: "level",
+      pendingUpgradeReasons: [], upgradeRefreshes: 2, refreshesUsed: 0, currentUpgradePicks: [], currentUpgradeReason: "level",
       combo: 0, comboTimer: 0, maxCombo: 0, perfectDodges: 0, slowTime: 0, dodgeFlash: 0,
+      damageTaken: false,
       enemies: [], bullets: [], hazards: [], particles: [], texts: [], pickups: [], stars: makeStars(),
       player: {
         x: width / 2, y: height / 2, r: 13, speed: 235, hp: 100, maxHp: 100,
@@ -111,6 +135,93 @@
     oscillator.connect(gain).connect(audioContext.destination);
     oscillator.start();
     oscillator.stop(audioContext.currentTime + duration);
+  }
+
+  function loadAchievementState() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(achievementStorageKey) || "{}");
+      return saved && typeof saved === "object" ? saved : {};
+    } catch (error) {
+      return {};
+    }
+  }
+
+  function saveAchievementState() {
+    try {
+      localStorage.setItem(achievementStorageKey, JSON.stringify(achievementState));
+    } catch (error) {
+      // Storage can be unavailable in privacy modes; gameplay should continue.
+    }
+  }
+
+  function isAchievementUnlocked(id) {
+    return Boolean(achievementState[id]);
+  }
+
+  function renderAchievements() {
+    const unlockedCount = achievementDefinitions.filter(item => isAchievementUnlocked(item.id)).length;
+    ui.achievementCount.textContent = `${unlockedCount}/${achievementDefinitions.length}`;
+    ui.achievementGrid.innerHTML = achievementDefinitions.map(item => {
+      const unlocked = isAchievementUnlocked(item.id);
+      return `<article class="achievement-card ${unlocked ? "unlocked" : "locked"}" style="--achievement-color:${item.color}">
+        <div class="achievement-icon">${item.icon}</div>
+        <h3>${item.name}</h3>
+        <p>${item.desc}</p>
+        <span class="achievement-category">${item.category} · ${unlocked ? "UNLOCKED" : "LOCKED"}</span>
+      </article>`;
+    }).join("");
+  }
+
+  function showNextAchievementToast() {
+    if (achievementToastTimer || achievementToastQueue.length === 0) return;
+    const item = achievementToastQueue.shift();
+    ui.achievementToastIcon.textContent = item.icon;
+    ui.achievementToastIcon.style.color = item.color;
+    ui.achievementToastName.textContent = item.name;
+    ui.achievementToastDesc.textContent = item.desc;
+    ui.achievementToast.classList.add("visible");
+    beep(880, .08, .05, "triangle");
+    setTimeout(() => beep(1175, .12, .04, "triangle"), 90);
+    achievementToastTimer = setTimeout(() => {
+      ui.achievementToast.classList.remove("visible");
+      achievementToastTimer = setTimeout(() => {
+        achievementToastTimer = null;
+        showNextAchievementToast();
+      }, 260);
+    }, 2600);
+  }
+
+  function unlockAchievement(id) {
+    if (isAchievementUnlocked(id)) return;
+    const item = achievementDefinitions.find(achievement => achievement.id === id);
+    if (!item) return;
+    achievementState[id] = Date.now();
+    saveAchievementState();
+    renderAchievements();
+    achievementToastQueue.push(item);
+    showNextAchievementToast();
+  }
+
+  function checkBuildAchievements() {
+    const names = activeSynergies().map(synergy => synergy.name);
+    if (names.includes("上下文审查")) unlockAchievement("synergy_context");
+    if (names.includes("提示词洪流")) unlockAchievement("synergy_flood");
+    if (names.includes("咖啡自动续杯")) unlockAchievement("synergy_coffee");
+    if (names.length === 3) unlockAchievement("all_synergies");
+    if ((game.player.upgrades.retry || 0) >= 4) unlockAchievement("retry_4");
+  }
+
+  function openAchievements() {
+    achievementReturnState = state;
+    state = "achievements";
+    renderAchievements();
+    ui.achievementScreen.classList.add("visible");
+  }
+
+  function closeAchievements() {
+    ui.achievementScreen.classList.remove("visible");
+    state = achievementReturnState;
+    lastTime = performance.now();
   }
 
   function startGame() {
@@ -256,6 +367,8 @@
     game.combo += 1;
     game.comboTimer = 3;
     game.maxCombo = Math.max(game.maxCombo, game.combo);
+    if (game.combo >= 50) unlockAchievement("combo_50");
+    if (game.combo >= 100) unlockAchievement("combo_100");
     if (game.combo === 8 || game.combo === 16 || game.combo === 24) {
       game.texts.push({ x, y: y - 35, text: `${game.combo} COMBO`, color: "#ffe66d", life: 1, glow: "#ffe66d", font: "900 14px ui-monospace, monospace" });
       beep(520 + game.combo * 8, .09, .035, "triangle");
@@ -315,11 +428,13 @@
     if (index < 0) return;
     game.enemies.splice(index, 1);
     game.kills += 1;
+    if (game.kills >= 200) unlockAchievement("solve_200");
     registerComboKill(enemy.x, enemy.y);
     if (enemy.kind.isBoss) {
       game.boss = null;
       game.activeBoss = null;
       game.bossDefeated = true;
+      unlockAchievement("boss_clear");
       ui.bossHud.classList.remove("visible");
       game.shake = 24;
       game.flash = .7;
@@ -413,6 +528,7 @@
   function refreshUpgradeChoices() {
     if (state !== "upgrade" || game.upgradeRefreshes <= 0) return;
     game.upgradeRefreshes -= 1;
+    game.refreshesUsed += 1;
     renderUpgradeChoices(pickUpgrades(game.currentUpgradePicks));
     updateRefreshButton();
     beep(392, .07, .03, "triangle");
@@ -431,6 +547,7 @@
     const p = game.player;
     upgrade.apply(p);
     p.upgrades[upgrade.id] = (p.upgrades[upgrade.id] || 0) + 1;
+    checkBuildAchievements();
     ui.upgrade.classList.remove("visible");
     updateBuild();
     updateUI();
@@ -521,6 +638,7 @@
     if (p.invincible > 0) return;
     resetCombo();
     p.hp -= amount;
+    game.damageTaken = true;
     p.invincible = .7;
     game.shake = 10;
     game.flash = .2;
@@ -682,6 +800,7 @@
       game.slowTime = .75;
       game.dodgeFlash = .35;
       game.perfectDodges += 1;
+      if (game.perfectDodges >= 5) unlockAchievement("perfect_5");
       p.perfectCritTime = 2.5;
       game.texts.push({ x: p.x, y: p.y - 52, text: "漂亮撤回", color: "#48e7ff", life: 1.1, glow: "#48e7ff", font: "900 14px sans-serif" });
       burst(p.x, p.y, "#48e7ff", 22, 220);
@@ -694,6 +813,8 @@
 
   function endGame(won) {
     state = "ended";
+    if (won && !game.damageTaken) unlockAchievement("flawless");
+    if (won && game.refreshesUsed === 0) unlockAchievement("no_refresh");
     const p = game.player;
     ui.bossHud.classList.remove("visible");
     ui.bossAlert.classList.remove("visible");
@@ -1005,6 +1126,10 @@
   window.addEventListener("keydown", event => {
     const key = event.key.toLowerCase();
     if (["w", "a", "s", "d", "r", "arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(key)) event.preventDefault();
+    if (key === "escape" && state === "achievements") {
+      closeAchievements();
+      return;
+    }
     if (key === "r" && state === "upgrade") refreshUpgradeChoices();
     else if (key === " ") dash(); else if (key === "escape") togglePause(); else keys.add(key);
   });
@@ -1013,12 +1138,15 @@
   $("#startButton").addEventListener("click", startGame);
   $("#restartButton").addEventListener("click", startGame);
   $("#resumeButton").addEventListener("click", () => togglePause(false));
+  ui.achievementButton.addEventListener("click", openAchievements);
+  ui.closeAchievements.addEventListener("click", closeAchievements);
   ui.pauseButton.addEventListener("click", () => togglePause());
   ui.refreshUpgrades.addEventListener("click", refreshUpgradeChoices);
   ui.sound.addEventListener("click", () => { soundOn = !soundOn; ui.sound.textContent = `声音：${soundOn ? "开" : "关"}`; if (soundOn) beep(440); });
 
   resize();
   game = freshGame();
+  renderAchievements();
   draw();
   requestAnimationFrame(loop);
 })();
