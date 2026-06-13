@@ -64,6 +64,11 @@
     { time: 210, kind: { name: "上下文爆炸", label: "上下文爆炸", color: "#ffe66d", hp: enemyKinds[3].hp * 18, speed: 34, size: 34, xp: 15, isMiniBoss: true }, quote: "“窗口满了，但需求还在增长。”" }
   ];
   const bossKind = { name: "合并冲突小姐", color: "#ff4fd8", hp: 3600, speed: 0, size: 54, xp: 30, isBoss: true };
+  const bossTaunts = [
+    "这个需求昨天不是这样的。",
+    "两个版本在我这里都能运行。",
+    "只改一行，不会出问题的。"
+  ];
   const achievementDefinitions = [
     { id: "perfect_5", icon: "⌁", name: "漂亮撤回", desc: "单局触发 5 次完美闪避。", category: "操作", color: "#55f2ff" },
     { id: "flawless", icon: "✓", name: "零冲突提交", desc: "五分钟内不受到任何伤害。", category: "挑战", color: "#7affb5" },
@@ -280,7 +285,7 @@
       x: width / 2, y: -80, kind: bossKind, r: bossKind.size,
       hp: bossKind.hp * hpScale, maxHp: bossKind.hp * hpScale,
       speed: 0, hit: 0, auraTick: 0, angle: 0, attackClock: 1.1,
-      burstClock: 4.2, summonClock: 6, entrance: 0
+      burstClock: 4.2, summonClock: 6, tauntClock: 5.5, lastTaunt: -1, entrance: 0
     };
     game.boss = boss;
     game.activeBoss = boss;
@@ -602,6 +607,24 @@
     beep(78, .22, .045, "sawtooth");
   }
 
+  function bossTaunt(boss) {
+    let index = Math.floor(Math.random() * bossTaunts.length);
+    if (index === boss.lastTaunt) index = (index + 1) % bossTaunts.length;
+    boss.lastTaunt = index;
+    game.texts.push({
+      x: boss.x,
+      y: boss.y + 100,
+      text: `“${bossTaunts[index]}”`,
+      color: "#ffd7f6",
+      life: 2.8,
+      maxLife: 2.8,
+      glow: "#ff4fd8",
+      font: "800 13px 'PingFang SC', 'Microsoft YaHei', sans-serif",
+      rise: 5
+    });
+    beep(132, .08, .025, "triangle");
+  }
+
   function updateBoss(boss, dt, player) {
     boss.entrance = Math.min(1, boss.entrance + dt * .7);
     const targetX = width * .5 + Math.sin(game.time * .72) * Math.min(260, width * .23);
@@ -614,6 +637,7 @@
     boss.attackClock -= dt;
     boss.burstClock -= dt;
     boss.summonClock -= dt;
+    boss.tauntClock -= dt;
     if (boss.attackClock <= 0) {
       boss.attackClock = boss.hp < boss.maxHp * .5 ? .72 : 1.08;
       fireBossFan(boss, player);
@@ -626,6 +650,10 @@
       boss.summonClock = 6.4;
       for (let i = 0; i < 3; i++) spawnEnemy(conflictKind, boss);
       game.texts.push({ x: boss.x, y: boss.y + 78, text: "<<<<<<< HEAD", color: "#ff4fd8", life: 1.2 });
+    }
+    if (boss.tauntClock <= 0) {
+      boss.tauntClock = 8 + Math.random() * 4;
+      bossTaunt(boss);
     }
     if (Math.hypot(player.x - boss.x, player.y - boss.y) < player.aura + boss.r && boss.auraTick <= 0) {
       boss.auraTick = .42;
