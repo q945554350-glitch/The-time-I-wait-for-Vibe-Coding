@@ -12,6 +12,7 @@
     start: $("#startScreen"), upgrade: $("#upgradeScreen"), pause: $("#pauseScreen"), end: $("#endScreen"),
     healthBar: $("#healthBar"), xpBar: $("#xpBar"), healthText: $("#healthText"), xpText: $("#xpText"),
     level: $("#levelText"), timer: $("#timerText"), wave: $("#waveText"), kills: $("#killText"),
+    comboHud: $("#comboHud"), comboText: $("#comboText"), comboBonus: $("#comboBonus"),
     choices: $("#upgradeChoices"), build: $("#buildList"), sound: $("#soundButton"), pauseButton: $("#pauseButton"),
     upgradeKicker: $("#upgradeKicker"), upgradeTitle: $("#upgradeTitle"), refreshUpgrades: $("#refreshUpgradesButton"),
     bossHud: $("#bossHud"), bossBar: $("#bossHealthBar"), bossAlert: $("#bossAlert"),
@@ -66,13 +67,15 @@
       bossSpawned: false, bossDefeated: false, boss: null, activeBoss: null, bossIntro: 0,
       miniBossSpawned: miniBossSchedule.map(entry => debugStartTime >= entry.time), miniBossesDefeated: 0,
       pendingUpgradeReasons: [], upgradeRefreshes: 2, currentUpgradePicks: [], currentUpgradeReason: "level",
+      combo: 0, comboTimer: 0, maxCombo: 0, perfectDodges: 0, slowTime: 0, dodgeFlash: 0,
       enemies: [], bullets: [], hazards: [], particles: [], texts: [], pickups: [], stars: makeStars(),
       player: {
         x: width / 2, y: height / 2, r: 13, speed: 235, hp: 100, maxHp: 100,
         level: 1, xp: 0, xpNeed: 8, damage: 15, fireRate: .64, fireClock: 0,
         bulletSpeed: 520, bulletSize: 4.5, projectiles: 1, pierce: 0, crit: .08,
         aura: 48, auraDamage: 2, dash: 0, dashMax: 2.2, dashTime: 0, invincible: 0,
-        dirX: 1, dirY: 0, snack: 0, snackProgress: 0, upgrades: {}
+        dirX: 1, dirY: 0, snack: 0, snackProgress: 0, perfectCritTime: 0,
+        coffeeRush: 0, fireBursts: 0, upgrades: {}
       }
     };
   }
@@ -225,6 +228,56 @@
     return best;
   }
 
+  function hasUpgrade(id) {
+    return (game.player.upgrades[id] || 0) > 0;
+  }
+
+  function hasSynergy(first, second) {
+    return hasUpgrade(first) && hasUpgrade(second);
+  }
+
+  function activeSynergies() {
+    const active = [];
+    if (hasSynergy("context", "takeover")) active.push({ name: "上下文审查", color: "#48e7ff" });
+    if (hasSynergy("retry", "model")) active.push({ name: "提示词洪流", color: "#ffe66d" });
+    if (hasSynergy("autosave", "coffee")) active.push({ name: "咖啡自动续杯", color: "#65f0a8" });
+    return active;
+  }
+
+  function comboFireBonus() {
+    return Math.min(.36, game.combo * .018);
+  }
+
+  function comboTokenBonus() {
+    return Math.min(2, Math.floor(game.combo / 8));
+  }
+
+  function registerComboKill(x, y) {
+    game.combo += 1;
+    game.comboTimer = 3;
+    game.maxCombo = Math.max(game.maxCombo, game.combo);
+    if (game.combo === 8 || game.combo === 16 || game.combo === 24) {
+      game.texts.push({ x, y: y - 35, text: `${game.combo} COMBO`, color: "#ffe66d", life: 1, glow: "#ffe66d", font: "900 14px ui-monospace, monospace" });
+      beep(520 + game.combo * 8, .09, .035, "triangle");
+    }
+  }
+
+  function resetCombo() {
+    game.combo = 0;
+    game.comboTimer = 0;
+  }
+
+  function createPlayerBullet(player, angle, damageScale = 1) {
+    const critChance = Math.min(.95, player.crit + (player.perfectCritTime > 0 ? .35 : 0));
+    const critical = Math.random() < critChance;
+    game.bullets.push({
+      x: player.x + Math.cos(angle) * 25, y: player.y - 5 + Math.sin(angle) * 25,
+      vx: Math.cos(angle) * player.bulletSpeed, vy: Math.sin(angle) * player.bulletSpeed,
+      r: player.bulletSize * (critical ? 1.45 : 1), damage: player.damage * damageScale * (critical ? 2.4 : 1),
+      life: 1.25, hits: player.pierce, critical
+    });
+  }
+
   function fire() {
     const p = game.player;
     const target = nearestEnemy();
@@ -233,23 +286,27 @@
     const spread = .16;
     for (let i = 0; i < p.projectiles; i++) {
       const offset = (i - (p.projectiles - 1) / 2) * spread;
-      const angle = base + offset;
-      const critical = Math.random() < p.crit;
-      game.bullets.push({
-        x: p.x + Math.cos(angle) * 25, y: p.y - 5 + Math.sin(angle) * 25,
-        vx: Math.cos(angle) * p.bulletSpeed, vy: Math.sin(angle) * p.bulletSpeed,
-        r: p.bulletSize * (critical ? 1.45 : 1), damage: p.damage * (critical ? 2.4 : 1),
-        life: 1.25, hits: p.pierce, critical
-      });
+      createPlayerBullet(p, base + offset);
+    }
+    p.fireBursts += 1;
+    if (hasSynergy("retry", "model") && p.fireBursts % 6 === 0) {
+      for (let i = 0; i < 7; i++) createPlayerBullet(p, base + (i - 3) * .2, .72);
+      game.texts.push({ x: p.x, y: p.y - 48, text: "提示词洪流", color: "#ffe66d", life: .75, glow: "#ffe66d" });
+      burst(p.x, p.y, "#ffe66d", 12, 125);
     }
     beep(280 + p.projectiles * 18, .028, .013, "triangle");
   }
 
-  function damageEnemy(enemy, amount, critical = false) {
+  function applyAuraDamage(enemy, player) {
+    const critical = hasSynergy("context", "takeover") && Math.random() < .2;
+    damageEnemy(enemy, player.auraDamage * (critical ? 2.4 : 1), critical, critical ? "上下文暴击" : "灵光一现!");
+  }
+
+  function damageEnemy(enemy, amount, critical = false, criticalText = "灵光一现!") {
     enemy.hp -= amount;
     enemy.hit = .08;
     burst(enemy.x, enemy.y, enemy.kind.color, critical ? 7 : 3, critical ? 130 : 75);
-    if (critical) game.texts.push({ x: enemy.x, y: enemy.y - enemy.r - 8, text: "灵光一现!", color: "#ffe66d", life: .6 });
+    if (critical) game.texts.push({ x: enemy.x, y: enemy.y - enemy.r - 8, text: criticalText, color: "#ffe66d", life: .6 });
     if (enemy.hp <= 0) killEnemy(enemy);
   }
 
@@ -258,6 +315,7 @@
     if (index < 0) return;
     game.enemies.splice(index, 1);
     game.kills += 1;
+    registerComboKill(enemy.x, enemy.y);
     if (enemy.kind.isBoss) {
       game.boss = null;
       game.activeBoss = null;
@@ -287,9 +345,14 @@
       p.snackProgress = 0;
       p.hp = Math.min(p.maxHp, p.hp + 6 * p.snack);
       game.texts.push({ x: p.x, y: p.y - 25, text: "+耐心", color: "#48e7ff", life: .8 });
+      if (hasSynergy("autosave", "coffee")) {
+        p.coffeeRush = 3;
+        game.texts.push({ x: p.x, y: p.y - 43, text: "咖啡自动续杯", color: "#65f0a8", life: 1, glow: "#65f0a8" });
+      }
     }
     burst(enemy.x, enemy.y, enemy.kind.color, 12, 170);
-    game.pickups.push({ x: enemy.x, y: enemy.y, value: enemy.kind.xp, r: 4 + enemy.kind.xp * .35, life: 12 });
+    const tokenValue = enemy.kind.xp + comboTokenBonus();
+    game.pickups.push({ x: enemy.x, y: enemy.y, value: tokenValue, r: 4 + tokenValue * .35, life: 12 });
     if (enemy.kind.xp >= 5 && !enemy.kind.isBoss) { game.shake = 7; beep(95, .12, .05, "sawtooth"); }
   }
 
@@ -381,10 +444,12 @@
 
   function updateBuild() {
     const entries = Object.entries(game.player.upgrades);
-    ui.build.innerHTML = entries.length ? entries.map(([id, count]) => {
+    const upgradeTags = entries.map(([id, count]) => {
       const item = upgrades.find(upgrade => upgrade.id === id);
       return `<span style="color:${item.color}">${item.name}${count > 1 ? ` ×${count}` : ""}</span>`;
-    }).join("") : "<span>等待第一次模型增幅</span>";
+    });
+    const synergyTags = activeSynergies().map(synergy => `<span style="color:${synergy.color};border:1px solid ${synergy.color}55">联动·${synergy.name}</span>`);
+    ui.build.innerHTML = [...upgradeTags, ...synergyTags].join("") || "<span>等待第一次模型增幅</span>";
   }
 
   function burst(x, y, color, count, force) {
@@ -447,13 +512,14 @@
     }
     if (Math.hypot(player.x - boss.x, player.y - boss.y) < player.aura + boss.r && boss.auraTick <= 0) {
       boss.auraTick = .42;
-      damageEnemy(boss, player.auraDamage);
+      applyAuraDamage(boss, player);
     }
   }
 
   function damagePlayer(amount, sourceX, sourceY) {
     const p = game.player;
     if (p.invincible > 0) return;
+    resetCombo();
     p.hp -= amount;
     p.invincible = .7;
     game.shake = 10;
@@ -472,6 +538,15 @@
     if (state !== "playing") return;
     const p = game.player;
     game.time += dt;
+    game.slowTime = Math.max(0, game.slowTime - dt);
+    game.dodgeFlash = Math.max(0, game.dodgeFlash - dt);
+    p.perfectCritTime = Math.max(0, p.perfectCritTime - dt);
+    p.coffeeRush = Math.max(0, p.coffeeRush - dt);
+    if (game.combo > 0) {
+      game.comboTimer -= dt;
+      if (game.comboTimer <= 0) resetCombo();
+    }
+    const worldDt = game.slowTime > 0 ? dt * .35 : dt;
     if (game.time >= GAME_DURATION) {
       game.time = GAME_DURATION;
       updateUI();
@@ -481,8 +556,8 @@
     for (let i = 0; i < miniBossSchedule.length; i++) {
       if (!game.miniBossSpawned[i] && game.time >= miniBossSchedule[i].time) spawnMiniBoss(i);
     }
-    game.bossIntro = Math.max(0, game.bossIntro - dt);
-    game.spawnClock -= dt;
+    game.bossIntro = Math.max(0, game.bossIntro - worldDt);
+    game.spawnClock -= worldDt;
     const finalMinute = game.time >= BOSS_TIME;
     const interval = Math.max(finalMinute ? .12 : .16, .78 - game.time * .0018);
     if (game.spawnClock <= 0) {
@@ -500,13 +575,14 @@
     const length = Math.hypot(dx, dy) || 1;
     if (dx || dy) { dx /= length; dy /= length; p.dirX = dx; p.dirY = dy; }
     const dashBoost = p.dashTime > 0 ? 3.25 : 1;
-    p.x = Math.max(p.r, Math.min(width - p.r, p.x + dx * p.speed * dashBoost * dt));
-    p.y = Math.max(p.r, Math.min(height - p.r, p.y + dy * p.speed * dashBoost * dt));
+    const coffeeBoost = p.coffeeRush > 0 ? 1.35 : 1;
+    p.x = Math.max(p.r, Math.min(width - p.r, p.x + dx * p.speed * coffeeBoost * dashBoost * dt));
+    p.y = Math.max(p.r, Math.min(height - p.r, p.y + dy * p.speed * coffeeBoost * dashBoost * dt));
     p.dash = Math.max(0, p.dash - dt);
     p.dashTime = Math.max(0, p.dashTime - dt);
     p.invincible = Math.max(0, p.invincible - dt);
     p.fireClock -= dt;
-    if (p.fireClock <= 0 && game.enemies.length) { p.fireClock = p.fireRate; fire(); }
+    if (p.fireClock <= 0 && game.enemies.length) { p.fireClock = p.fireRate / (1 + comboFireBonus()); fire(); }
 
     for (let i = game.bullets.length - 1; i >= 0; i--) {
       const bullet = game.bullets[i];
@@ -523,7 +599,7 @@
 
     for (let i = game.hazards.length - 1; i >= 0; i--) {
       const hazard = game.hazards[i];
-      hazard.x += hazard.vx * dt; hazard.y += hazard.vy * dt; hazard.life -= dt; hazard.spin += dt * 4;
+      hazard.x += hazard.vx * worldDt; hazard.y += hazard.vy * worldDt; hazard.life -= worldDt; hazard.spin += worldDt * 4;
       const outside = hazard.x < -50 || hazard.x > width + 50 || hazard.y < -50 || hazard.y > height + 50;
       if (Math.hypot(hazard.x - p.x, hazard.y - p.y) < hazard.r + p.r) {
         damagePlayer(hazard.damage, hazard.x, hazard.y);
@@ -533,18 +609,18 @@
 
     for (const enemy of [...game.enemies]) {
       if (enemy.kind.isBoss) {
-        updateBoss(enemy, dt, p);
+        updateBoss(enemy, worldDt, p);
         continue;
       }
       const ex = p.x - enemy.x, ey = p.y - enemy.y, distance = Math.hypot(ex, ey) || 1;
-      enemy.x += ex / distance * enemy.speed * dt;
-      enemy.y += ey / distance * enemy.speed * dt;
-      enemy.angle += dt;
-      enemy.hit = Math.max(0, enemy.hit - dt);
-      enemy.auraTick -= dt;
+      enemy.x += ex / distance * enemy.speed * worldDt;
+      enemy.y += ey / distance * enemy.speed * worldDt;
+      enemy.angle += worldDt;
+      enemy.hit = Math.max(0, enemy.hit - worldDt);
+      enemy.auraTick -= worldDt;
       if (distance < p.aura + enemy.r && enemy.auraTick <= 0) {
         enemy.auraTick = .42;
-        damageEnemy(enemy, p.auraDamage);
+        applyAuraDamage(enemy, p);
       }
       if (distance < p.r + enemy.r && p.invincible <= 0) {
         damagePlayer(8 + enemy.kind.xp * 1.5, enemy.x, enemy.y);
@@ -599,7 +675,19 @@
   function dash() {
     if (state !== "playing" || game.player.dash > 0) return;
     const p = game.player;
+    const dangerNearby = game.hazards.some(hazard => Math.hypot(hazard.x - p.x, hazard.y - p.y) < hazard.r + p.r + 52)
+      || game.enemies.some(enemy => Math.hypot(enemy.x - p.x, enemy.y - p.y) < enemy.r + p.r + 42);
     p.dash = p.dashMax; p.dashTime = .18; p.invincible = .28;
+    if (dangerNearby) {
+      game.slowTime = .75;
+      game.dodgeFlash = .35;
+      game.perfectDodges += 1;
+      p.perfectCritTime = 2.5;
+      game.texts.push({ x: p.x, y: p.y - 52, text: "漂亮撤回", color: "#48e7ff", life: 1.1, glow: "#48e7ff", font: "900 14px sans-serif" });
+      burst(p.x, p.y, "#48e7ff", 22, 220);
+      beep(720, .1, .05, "triangle");
+      setTimeout(() => beep(960, .12, .04, "sine"), 70);
+    }
     burst(p.x, p.y, "#7de2c1", 10, 140);
     beep(210, .09, .035, "sawtooth");
   }
@@ -614,7 +702,7 @@
     $("#endSummary").textContent = won
       ? (game.bossDefeated ? "合并冲突已经解决。现在切回工作区，看看这一轮 Vibe Coding 写出了什么。" : "你撑过了最终合并请求。现在切回工作区，生成结果大概正在等你。")
       : "不用把等待也变成压力。先回到工作区看看进度，需要的话再开一局。";
-    $("#endStats").innerHTML = `<div><strong>${formatTime(game.time)}</strong><span>等待时间</span></div><div><strong>${game.kills}</strong><span>已解决</span></div><div><strong>${p.level}</strong><span>最终迭代</span></div>`;
+    $("#endStats").innerHTML = `<div><strong>${formatTime(game.time)}</strong><span>等待时间</span></div><div><strong>${game.kills}</strong><span>已解决</span></div><div><strong>${game.maxCombo}</strong><span>最高连杀</span></div><div><strong>${game.perfectDodges}</strong><span>漂亮撤回</span></div><div><strong>${p.level}</strong><span>最终迭代</span></div>`;
     ui.end.classList.add("visible");
     beep(won ? 523 : 180, .25, .05, won ? "sine" : "triangle");
   }
@@ -635,6 +723,11 @@
     ui.level.textContent = p.level;
     ui.timer.textContent = formatTime(game.time);
     ui.kills.textContent = game.kills;
+    const fireBonus = Math.round(comboFireBonus() * 100);
+    const tokenBonus = comboTokenBonus();
+    ui.comboHud.classList.toggle("visible", game.combo > 0);
+    ui.comboText.textContent = `${game.combo} COMBO`;
+    ui.comboBonus.textContent = `射速 +${fireBonus}%${tokenBonus ? ` · Token +${tokenBonus}` : ""}`;
     ui.wave.textContent = game.activeBoss?.kind.isMiniBoss
       ? `${game.activeBoss.kind.name}正在阻塞生成`
       : game.time < 60 ? "代码正在生成" : game.time < 150 ? "模型开始深入上下文" : game.time < BOSS_TIME ? "生成还需要一点时间" : game.bossDefeated ? "冲突已解决，坚持到生成完成" : "FINAL MERGE REQUEST";
@@ -679,6 +772,8 @@
     if (game) {
       drawPickups(); drawBullets(); drawHazards(); drawEnemies(); drawPlayer(); drawParticles(); drawTexts();
       if (game.flash > 0) { ctx.fillStyle = `rgba(255, 93, 72, ${game.flash * .35})`; ctx.fillRect(-10, -10, width + 20, height + 20); }
+      if (game.dodgeFlash > 0) { ctx.fillStyle = `rgba(72, 231, 255, ${game.dodgeFlash * .22})`; ctx.fillRect(-10, -10, width + 20, height + 20); }
+      if (game.slowTime > 0) { ctx.strokeStyle = "rgba(72,231,255,.35)"; ctx.lineWidth = 5; ctx.strokeRect(3, 3, width - 6, height - 6); }
     }
     ctx.restore();
   }
