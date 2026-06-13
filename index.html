@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#080b14" />
+    <title>我等待 Vibe Coding 的时间</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="eyebrow">FIVE MINUTES BETWEEN PROMPTS</span>
+          <h1>我等待 Vibe Coding 的时间</h1>
+        </div>
+        <div class="top-actions">
+          <button id="soundButton" class="icon-button" type="button" aria-label="切换声音">声音：开</button>
+          <button id="pauseButton" class="icon-button" type="button">暂停</button>
+        </div>
+      </header>
+
+      <section class="game-frame" aria-label="我等待 Vibe Coding 的时间游戏区域">
+        <canvas id="gameCanvas"></canvas>
+
+        <div class="hud" aria-hidden="true">
+          <div class="hud-left">
+            <div class="level-badge"><span>迭代</span><strong id="levelText">1</strong></div>
+            <div class="bar-stack">
+              <div class="bar-row health-row">
+                <span>耐心</span>
+                <div class="bar"><i id="healthBar"></i></div>
+                <b id="healthText">100 / 100</b>
+              </div>
+              <div class="bar-row xp-row">
+                <span>Token</span>
+                <div class="bar"><i id="xpBar"></i></div>
+                <b id="xpText">0 / 8</b>
+              </div>
+            </div>
+          </div>
+          <div class="hud-center">
+            <strong id="timerText">00:00</strong>
+            <span id="waveText">代码正在生成</span>
+          </div>
+          <div class="hud-right">
+            <span>已解决</span>
+            <strong id="killText">0</strong>
+          </div>
+        </div>
+
+        <div id="bossHud" class="boss-hud" aria-hidden="true">
+          <div class="boss-label"><span>FINAL MERGE REQUEST</span><strong>合并冲突小姐</strong></div>
+          <div class="boss-bar"><i id="bossHealthBar"></i></div>
+        </div>
+
+        <div id="bossAlert" class="boss-alert" aria-hidden="true">
+          <span>FINAL MERGE REQUEST</span>
+          <strong>合并冲突小姐</strong>
+          <p>“两个版本，都想活下来。”</p>
+        </div>
+
+        <div id="startScreen" class="overlay visible">
+          <div class="start-card">
+            <p class="kicker">代码正在另一边生长。</p>
+            <h2>我等待 <em>Vibe Coding</em><br />的时间。</h2>
+            <p class="intro">一次生成大约需要五分钟。别盯着进度条：清理报错、收集 Token、把提示词武装到离谱，然后准时回去工作。</p>
+            <div class="controls">
+              <span><kbd>WASD</kbd> 移动</span>
+              <span><kbd>空格</kbd> 闪身</span>
+              <span><kbd>自动</kbd> 攻击</span>
+            </div>
+            <button id="startButton" class="primary-button" type="button">开始等待</button>
+            <small>最后一分钟，合并冲突小姐会亲自接管。</small>
+          </div>
+        </div>
+
+        <div id="upgradeScreen" class="overlay">
+          <div class="choice-panel">
+            <p class="kicker">PROMPT EVOLUTION</p>
+            <h2>这次迭代，强化什么？</h2>
+            <div id="upgradeChoices" class="upgrade-grid"></div>
+          </div>
+        </div>
+
+        <div id="pauseScreen" class="overlay compact">
+          <div class="pause-card">
+            <p class="kicker">GENERATION PAUSED</p>
+            <h2>代码不会跑掉。</h2>
+            <button id="resumeButton" class="primary-button" type="button">继续</button>
+          </div>
+        </div>
+
+        <div id="endScreen" class="overlay">
+          <div class="end-card">
+            <p id="endKicker" class="kicker">GENERATION WINDOW CLOSED</p>
+            <h2 id="endTitle">该回去看看代码了。</h2>
+            <p id="endSummary" class="intro"></p>
+            <div id="endStats" class="end-stats"></div>
+            <button id="restartButton" class="primary-button" type="button">再等一次</button>
+          </div>
+        </div>
+      </section>
+
+      <footer>
+        <p>等待不是空白，它是一局完整的构筑。</p>
+        <div id="buildList" class="build-list"><span>等待第一次模型增幅</span></div>
+      </footer>
+    </main>
+
+    <script src="game.js"></script>
+  </body>
+</html>
