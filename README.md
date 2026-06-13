@@ -2,7 +2,11 @@
 
 一个填满 Vibe Coding 生成间隙的五分钟浏览器肉鸽（roguelike）。
 
+> **完全免费且开源。** 无广告、无内购、无账号系统，也不会收集任何数据。打开浏览器即可游玩。
+
 > The time I wait for Vibe Coding: have a thrilling five-minute battle and face Merge Conflict Miss in the final minute.
+>
+> Completely free and open source. No ads, no in-app purchases, no account required, and no data collection.
 
 ## 为什么做这个
 
@@ -42,4 +46,4 @@ python3 -m http.server 8000
 
 ## License
 
-[MIT](LICENSE)
+本项目采用 [MIT License](LICENSE)，你可以自由游玩、学习、修改和分发。
