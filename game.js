@@ -13,7 +13,10 @@
     healthBar: $("#healthBar"), xpBar: $("#xpBar"), healthText: $("#healthText"), xpText: $("#xpText"),
     level: $("#levelText"), timer: $("#timerText"), wave: $("#waveText"), kills: $("#killText"),
     choices: $("#upgradeChoices"), build: $("#buildList"), sound: $("#soundButton"), pauseButton: $("#pauseButton"),
-    bossHud: $("#bossHud"), bossBar: $("#bossHealthBar"), bossAlert: $("#bossAlert")
+    upgradeKicker: $("#upgradeKicker"), upgradeTitle: $("#upgradeTitle"),
+    bossHud: $("#bossHud"), bossBar: $("#bossHealthBar"), bossAlert: $("#bossAlert"),
+    bossHudKicker: $("#bossHudKicker"), bossHudName: $("#bossHudName"),
+    bossAlertKicker: $("#bossAlertKicker"), bossAlertName: $("#bossAlertName"), bossAlertQuote: $("#bossAlertQuote")
   };
 
   const TAU = Math.PI * 2;
@@ -49,12 +52,20 @@
   ];
 
   const conflictKind = { name: "冲突标记", label: "冲突", color: "#ff4fd8", hp: 42, speed: 74, size: 18, xp: 3 };
+  const miniBossSchedule = [
+    { time: 45, kind: { name: "编译崩溃", label: "编译崩溃", color: "#ff4fd8", hp: enemyKinds[0].hp * 10, speed: 43, size: 27, xp: 8, isMiniBoss: true }, quote: "“这一处红字，想占满整个终端。”" },
+    { time: 105, kind: { name: "幻觉风暴", label: "幻觉风暴", color: "#a75bff", hp: enemyKinds[1].hp * 12, speed: 52, size: 29, xp: 10, isMiniBoss: true }, quote: "“说得越像真的，就越危险。”" },
+    { time: 165, kind: { name: "需求失控", label: "需求失控", color: "#3f8cff", hp: enemyKinds[2].hp * 15, speed: 39, size: 31, xp: 12, isMiniBoss: true }, quote: "“再加一个功能，就一个。”" },
+    { time: 210, kind: { name: "上下文爆炸", label: "上下文爆炸", color: "#ffe66d", hp: enemyKinds[3].hp * 18, speed: 34, size: 34, xp: 15, isMiniBoss: true }, quote: "“窗口满了，但需求还在增长。”" }
+  ];
   const bossKind = { name: "合并冲突小姐", color: "#ff4fd8", hp: 3600, speed: 0, size: 54, xp: 30, isBoss: true };
 
   function freshGame() {
     return {
       time: Math.min(debugStartTime, GAME_DURATION - 1), kills: 0, spawnClock: 0, shake: 0, flash: 0,
-      bossSpawned: false, bossDefeated: false, boss: null, bossIntro: 0,
+      bossSpawned: false, bossDefeated: false, boss: null, activeBoss: null, bossIntro: 0,
+      miniBossSpawned: miniBossSchedule.map(entry => debugStartTime >= entry.time), miniBossesDefeated: 0,
+      pendingUpgradeReasons: [],
       enemies: [], bullets: [], hazards: [], particles: [], texts: [], pickups: [], stars: makeStars(),
       player: {
         x: width / 2, y: height / 2, r: 13, speed: 235, hp: 100, maxHp: 100,
@@ -158,7 +169,9 @@
       burstClock: 4.2, summonClock: 6, entrance: 0
     };
     game.boss = boss;
+    game.activeBoss = boss;
     game.enemies.push(boss);
+    setBossPresentation("FINAL MERGE REQUEST", bossKind.name, "“两个版本，都想活下来。”");
     ui.bossHud.classList.add("visible");
     ui.bossAlert.classList.remove("visible");
     void ui.bossAlert.offsetWidth;
@@ -169,6 +182,37 @@
     burst(width / 2, 110, "#ff4fd8", 28, 260);
     beep(92, .5, .07, "sawtooth");
     setTimeout(() => beep(138, .45, .055, "sawtooth"), 180);
+  }
+
+  function spawnMiniBoss(scheduleIndex) {
+    const entry = miniBossSchedule[scheduleIndex];
+    game.miniBossSpawned[scheduleIndex] = true;
+    const progressScale = 1 + game.time / GAME_DURATION * .9;
+    const kind = entry.kind;
+    const miniBoss = {
+      x: width / 2, y: -50, kind, r: kind.size,
+      hp: kind.hp * progressScale, maxHp: kind.hp * progressScale,
+      speed: kind.speed, hit: 0, auraTick: 0, angle: 0, scheduleIndex
+    };
+    game.activeBoss = miniBoss;
+    game.enemies.push(miniBoss);
+    setBossPresentation(`MINUTE ${scheduleIndex + 1} CHECKPOINT`, kind.name, entry.quote);
+    ui.bossHud.classList.add("visible");
+    ui.bossAlert.classList.remove("visible");
+    void ui.bossAlert.offsetWidth;
+    ui.bossAlert.classList.add("visible");
+    game.shake = 12 + scheduleIndex * 2;
+    game.flash = .28;
+    burst(width / 2, 90, kind.color, 26, 230);
+    beep(116 - scheduleIndex * 8, .32, .055, "sawtooth");
+  }
+
+  function setBossPresentation(kicker, name, quote) {
+    ui.bossHudKicker.textContent = kicker;
+    ui.bossHudName.textContent = name;
+    ui.bossAlertKicker.textContent = kicker;
+    ui.bossAlertName.textContent = name;
+    ui.bossAlertQuote.textContent = quote;
   }
 
   function nearestEnemy() {
@@ -216,6 +260,7 @@
     game.kills += 1;
     if (enemy.kind.isBoss) {
       game.boss = null;
+      game.activeBoss = null;
       game.bossDefeated = true;
       ui.bossHud.classList.remove("visible");
       game.shake = 24;
@@ -224,6 +269,17 @@
       game.texts.push({ x: enemy.x, y: enemy.y - 65, text: "冲突已解决", color: "#eef8ff", life: 2 });
       beep(220, .18, .07, "sawtooth");
       setTimeout(() => beep(440, .3, .06, "triangle"), 170);
+    } else if (enemy.kind.isMiniBoss) {
+      const wasActiveBoss = game.activeBoss === enemy;
+      if (wasActiveBoss) game.activeBoss = null;
+      game.miniBossesDefeated += 1;
+      if (wasActiveBoss) ui.bossHud.classList.remove("visible");
+      game.shake = 18;
+      game.flash = .5;
+      for (let i = 0; i < 3; i++) setTimeout(() => burst(enemy.x, enemy.y, enemy.kind.color, 20, 260), i * 80);
+      game.texts.push({ x: enemy.x, y: enemy.y - 55, text: "问题已压住", color: "#eef8ff", life: 1.5 });
+      beep(196, .16, .06, "sawtooth");
+      requestUpgrade("miniBoss");
     }
     const p = game.player;
     p.snackProgress += 1;
@@ -244,12 +300,23 @@
       p.xp -= p.xpNeed;
       p.level += 1;
       p.xpNeed = Math.floor(p.xpNeed * 1.27 + 4);
-      showUpgrade();
+      requestUpgrade("level");
     }
   }
 
-  function showUpgrade() {
+  function requestUpgrade(reason) {
+    if (state === "upgrade") {
+      game.pendingUpgradeReasons.push(reason);
+      return;
+    }
+    showUpgrade(reason);
+  }
+
+  function showUpgrade(reason = "level") {
     state = "upgrade";
+    const isMiniBossReward = reason === "miniBoss";
+    ui.upgradeKicker.textContent = isMiniBossReward ? "MINI BOSS REWARD" : "PROMPT EVOLUTION";
+    ui.upgradeTitle.textContent = isMiniBossReward ? "问题已解决，额外强化一次。" : "这次迭代，强化什么？";
     const picks = [...upgrades].sort(() => Math.random() - .5).slice(0, 3);
     ui.choices.innerHTML = "";
     for (const upgrade of picks) {
@@ -257,7 +324,7 @@
       const button = document.createElement("button");
       button.className = "upgrade-card";
       button.style.setProperty("--accent", upgrade.color);
-      button.innerHTML = `<span class="upgrade-icon">${upgrade.icon}</span><h3>${upgrade.name}</h3><p>${upgrade.desc}</p><small>${count ? `已增幅 ${count} 次` : "首次模型增幅"}</small>`;
+      button.innerHTML = `<span class="upgrade-icon">${upgrade.icon}</span><h3>${upgrade.name}</h3><p>${upgrade.desc}</p><small>${isMiniBossReward ? "小 Boss 战利品" : count ? `已增幅 ${count} 次` : "首次模型增幅"}</small>`;
       button.addEventListener("click", () => chooseUpgrade(upgrade), { once: true });
       ui.choices.appendChild(button);
     }
@@ -271,9 +338,13 @@
     upgrade.apply(p);
     p.upgrades[upgrade.id] = (p.upgrades[upgrade.id] || 0) + 1;
     ui.upgrade.classList.remove("visible");
-    state = "playing";
     updateBuild();
     updateUI();
+    if (game.pendingUpgradeReasons.length) {
+      showUpgrade(game.pendingUpgradeReasons.shift());
+      return;
+    }
+    state = "playing";
     lastTime = performance.now();
   }
 
@@ -376,6 +447,9 @@
       return endGame(true);
     }
     if (!game.bossSpawned && game.time >= BOSS_TIME) spawnBoss();
+    for (let i = 0; i < miniBossSchedule.length; i++) {
+      if (!game.miniBossSpawned[i] && game.time >= miniBossSchedule[i].time) spawnMiniBoss(i);
+    }
     game.bossIntro = Math.max(0, game.bossIntro - dt);
     game.spawnClock -= dt;
     const finalMinute = game.time >= BOSS_TIME;
@@ -530,8 +604,10 @@
     ui.level.textContent = p.level;
     ui.timer.textContent = formatTime(game.time);
     ui.kills.textContent = game.kills;
-    ui.wave.textContent = game.time < 60 ? "代码正在生成" : game.time < 150 ? "模型开始深入上下文" : game.time < BOSS_TIME ? "生成还需要一点时间" : game.bossDefeated ? "冲突已解决，坚持到生成完成" : "FINAL MERGE REQUEST";
-    if (game.boss) ui.bossBar.style.width = `${Math.max(0, game.boss.hp / game.boss.maxHp * 100)}%`;
+    ui.wave.textContent = game.activeBoss?.kind.isMiniBoss
+      ? `${game.activeBoss.kind.name}正在阻塞生成`
+      : game.time < 60 ? "代码正在生成" : game.time < 150 ? "模型开始深入上下文" : game.time < BOSS_TIME ? "生成还需要一点时间" : game.bossDefeated ? "冲突已解决，坚持到生成完成" : "FINAL MERGE REQUEST";
+    if (game.activeBoss) ui.bossBar.style.width = `${Math.max(0, game.activeBoss.hp / game.activeBoss.maxHp * 100)}%`;
   }
 
   function drawBackground() {
@@ -626,11 +702,20 @@
       const badgeHeight = 25;
       ctx.save(); ctx.translate(Math.round(enemy.x), Math.round(enemy.y));
       ctx.rotate(Math.sin(enemy.angle * .7) * .045);
-      ctx.shadowBlur = enemy.hit > 0 ? 20 : 10;
+      if (enemy.kind.isMiniBoss) {
+        ctx.globalAlpha = .45;
+        ctx.strokeStyle = enemy.kind.color;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(0, 0, enemy.r + 13 + Math.sin(game.time * 5) * 2, 0, TAU);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+      ctx.shadowBlur = enemy.hit > 0 ? 20 : enemy.kind.isMiniBoss ? 18 : 10;
       ctx.shadowColor = enemy.hit > 0 ? "#ffffff" : enemy.kind.color;
       ctx.fillStyle = "rgba(7, 10, 22, .9)";
       ctx.strokeStyle = enemy.hit > 0 ? "#ffffff" : enemy.kind.color;
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = enemy.kind.isMiniBoss ? 2.5 : 1.5;
       roundedRectPath(ctx, -badgeWidth / 2, -badgeHeight / 2, badgeWidth, badgeHeight, 7);
       ctx.fill(); ctx.stroke();
       ctx.globalAlpha = .2;
@@ -644,6 +729,11 @@
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(label, 0, .5);
+      if (enemy.kind.isMiniBoss) {
+        ctx.font = "800 7px ui-monospace, monospace";
+        ctx.fillStyle = enemy.kind.color;
+        ctx.fillText("MINI BOSS", 0, -badgeHeight / 2 - 7);
+      }
       ctx.restore();
       if (enemy.hp < enemy.maxHp) {
         const healthWidth = badgeWidth - 8;
