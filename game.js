@@ -42,13 +42,13 @@
   ];
 
   const enemyKinds = [
-    { name: "语法报错", color: "#ff4fd8", hp: 14, speed: 55, size: 12, xp: 1 },
-    { name: "模型幻觉", color: "#a75bff", hp: 24, speed: 82, size: 10, xp: 2 },
-    { name: "需求漂移", color: "#3f8cff", hp: 46, speed: 42, size: 17, xp: 3 },
-    { name: "上下文溢出", color: "#ffe66d", hp: 80, speed: 32, size: 22, xp: 5 }
+    { name: "语法报错", label: "报错", color: "#ff4fd8", hp: 14, speed: 55, size: 17, xp: 1 },
+    { name: "模型幻觉", label: "幻觉", color: "#a75bff", hp: 24, speed: 82, size: 17, xp: 2 },
+    { name: "需求漂移", label: "漂移", color: "#3f8cff", hp: 46, speed: 42, size: 18, xp: 3 },
+    { name: "上下文溢出", label: "溢出", color: "#ffe66d", hp: 80, speed: 32, size: 20, xp: 5 }
   ];
 
-  const conflictKind = { name: "冲突标记", color: "#ff4fd8", hp: 42, speed: 74, size: 14, xp: 3 };
+  const conflictKind = { name: "冲突标记", label: "冲突", color: "#ff4fd8", hp: 42, speed: 74, size: 18, xp: 3 };
   const bossKind = { name: "合并冲突小姐", color: "#ff4fd8", hp: 3600, speed: 0, size: 54, xp: 30, isBoss: true };
 
   function freshGame() {
@@ -452,7 +452,23 @@
       orb.life -= dt;
       const ox = p.x - orb.x, oy = p.y - orb.y, distance = Math.hypot(ox, oy) || 1;
       if (distance < 120) { const pull = 90 + (120 - distance) * 4; orb.x += ox / distance * pull * dt; orb.y += oy / distance * pull * dt; }
-      if (distance < p.r + orb.r + 5) { gainXp(orb.value); game.pickups.splice(i, 1); beep(650, .025, .012, "sine"); }
+      if (distance < p.r + orb.r + 5) {
+        gainXp(orb.value);
+        game.texts.push({
+          x: p.x + (Math.random() - .5) * 8,
+          y: p.y - 47,
+          text: orb.value > 1 ? `+${orb.value} TOKEN` : "+TOKEN",
+          color: "#c8faff",
+          life: .8,
+          maxLife: .8,
+          alpha: .68,
+          font: "700 11px ui-monospace, monospace",
+          rise: 18,
+          glow: "#48e7ff"
+        });
+        game.pickups.splice(i, 1);
+        beep(650, .025, .012, "sine");
+      }
       else if (orb.life <= 0) game.pickups.splice(i, 1);
     }
 
@@ -470,7 +486,7 @@
       if (particle.life <= 0) game.particles.splice(i, 1);
     }
     for (let i = game.texts.length - 1; i >= 0; i--) {
-      game.texts[i].y -= 24 * dt; game.texts[i].life -= dt;
+      game.texts[i].y -= (game.texts[i].rise ?? 24) * dt; game.texts[i].life -= dt;
       if (game.texts[i].life <= 0) game.texts.splice(i, 1);
     }
   }
@@ -605,19 +621,51 @@
         drawBoss(enemy);
         continue;
       }
-      ctx.save(); ctx.translate(enemy.x, enemy.y); ctx.rotate(enemy.angle * .22);
-      ctx.fillStyle = enemy.hit > 0 ? "#ffffff" : enemy.kind.color;
-      ctx.globalAlpha = .92; ctx.beginPath();
-      const sides = enemy.kind.xp + 3;
-      for (let i = 0; i < sides; i++) { const angle = i / sides * TAU; const radius = enemy.r * (i % 2 ? .82 : 1); ctx.lineTo(Math.cos(angle) * radius, Math.sin(angle) * radius); }
-      ctx.closePath(); ctx.fill();
-      ctx.fillStyle = "#0b0e17"; ctx.globalAlpha = .75; ctx.beginPath(); ctx.arc(0, 0, enemy.r * .45, 0, TAU); ctx.fill();
+      const label = enemy.kind.label || enemy.kind.name.slice(0, 4);
+      const badgeWidth = Math.max(40, label.length * 15 + 15);
+      const badgeHeight = 25;
+      ctx.save(); ctx.translate(Math.round(enemy.x), Math.round(enemy.y));
+      ctx.rotate(Math.sin(enemy.angle * .7) * .045);
+      ctx.shadowBlur = enemy.hit > 0 ? 20 : 10;
+      ctx.shadowColor = enemy.hit > 0 ? "#ffffff" : enemy.kind.color;
+      ctx.fillStyle = "rgba(7, 10, 22, .9)";
+      ctx.strokeStyle = enemy.hit > 0 ? "#ffffff" : enemy.kind.color;
+      ctx.lineWidth = 1.5;
+      roundedRectPath(ctx, -badgeWidth / 2, -badgeHeight / 2, badgeWidth, badgeHeight, 7);
+      ctx.fill(); ctx.stroke();
+      ctx.globalAlpha = .2;
+      ctx.fillStyle = enemy.kind.color;
+      roundedRectPath(ctx, -badgeWidth / 2 + 3, -badgeHeight / 2 + 3, badgeWidth - 6, badgeHeight - 6, 5);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.shadowBlur = 7;
+      ctx.fillStyle = "#eef8ff";
+      ctx.font = "800 12px 'PingFang SC', 'Microsoft YaHei', sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, 0, .5);
       ctx.restore();
       if (enemy.hp < enemy.maxHp) {
-        ctx.fillStyle = "rgba(255,255,255,.12)"; ctx.fillRect(enemy.x - enemy.r, enemy.y + enemy.r + 5, enemy.r * 2, 2);
-        ctx.fillStyle = enemy.kind.color; ctx.fillRect(enemy.x - enemy.r, enemy.y + enemy.r + 5, enemy.r * 2 * Math.max(0, enemy.hp / enemy.maxHp), 2);
+        const healthWidth = badgeWidth - 8;
+        ctx.fillStyle = "rgba(255,255,255,.12)"; ctx.fillRect(enemy.x - healthWidth / 2, enemy.y + badgeHeight / 2 + 5, healthWidth, 2);
+        ctx.fillStyle = enemy.kind.color; ctx.fillRect(enemy.x - healthWidth / 2, enemy.y + badgeHeight / 2 + 5, healthWidth * Math.max(0, enemy.hp / enemy.maxHp), 2);
       }
     }
+  }
+
+  function roundedRectPath(context, x, y, w, h, radius) {
+    const r = Math.min(radius, w / 2, h / 2);
+    context.beginPath();
+    context.moveTo(x + r, y);
+    context.lineTo(x + w - r, y);
+    context.quadraticCurveTo(x + w, y, x + w, y + r);
+    context.lineTo(x + w, y + h - r);
+    context.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    context.lineTo(x + r, y + h);
+    context.quadraticCurveTo(x, y + h, x, y + h - r);
+    context.lineTo(x, y + r);
+    context.quadraticCurveTo(x, y, x + r, y);
+    context.closePath();
   }
 
   function drawBoss(boss) {
@@ -714,9 +762,20 @@
   }
 
   function drawTexts() {
-    ctx.textAlign = "center"; ctx.font = "800 12px sans-serif";
-    for (const item of game.texts) { ctx.globalAlpha = Math.min(1, item.life * 2); ctx.fillStyle = item.color; ctx.fillText(item.text, item.x, item.y); }
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    for (const item of game.texts) {
+      const maxLife = item.maxLife || 1;
+      const fade = Math.min(1, item.life / Math.min(.35, maxLife));
+      ctx.globalAlpha = fade * (item.alpha ?? 1);
+      ctx.font = item.font || "800 12px sans-serif";
+      ctx.fillStyle = item.color;
+      ctx.shadowBlur = item.glow ? 8 : 0;
+      ctx.shadowColor = item.glow || "transparent";
+      ctx.fillText(item.text, item.x, item.y);
+    }
     ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
   }
 
   function loop(now) {
