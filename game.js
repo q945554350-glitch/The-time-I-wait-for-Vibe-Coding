@@ -27,6 +27,12 @@
   const TAU = Math.PI * 2;
   const GAME_DURATION = 300;
   const BOSS_TIME = 240;
+  const ENEMY_GRID_SIZE = 80;
+  const MAX_HAZARDS = 260;
+  const MAX_PARTICLES = 360;
+  const MAX_TEXTS = 90;
+  const MAX_PICKUPS = 180;
+  const HAZARD_COLORS = ["#48e7ff", "#ff4fd8", "#a75bff", "#ffe66d", "#3f8cff"];
   const isLocalPreview = location.hostname === "localhost" || location.hostname === "127.0.0.1";
   const debugStartTime = isLocalPreview ? Number(new URLSearchParams(location.search).get("t")) || 0 : 0;
   const keys = new Set();
@@ -96,7 +102,8 @@
       miniBossSpawned: miniBossSchedule.map(entry => debugStartTime >= entry.time), miniBossesDefeated: 0,
       pendingUpgradeReasons: [], upgradeRefreshes: 2, refreshesUsed: 0, currentUpgradePicks: [], currentUpgradeReason: "level",
       combo: 0, comboTimer: 0, maxCombo: 0, perfectDodges: 0, slowTime: 0, dodgeFlash: 0,
-      damageTaken: false,
+      damageTaken: false, hazardCursor: 0, enemySoundClock: 0, pickupSoundClock: 0,
+      enemyGrid: new Map(), gridColumns: 0,
       enemies: [], bullets: [], hazards: [], particles: [], texts: [], pickups: [], stars: makeStars(),
       player: {
         x: width / 2, y: height / 2, r: 13, speed: 235, hp: 100, maxHp: 100,
@@ -287,7 +294,7 @@
       speed: kind.speed * (1 + progress * .28) * (elite ? 1.12 : 1), hit: 0, auraTick: 0, angle: Math.random() * TAU,
       attackClock: kind.ranged ? .8 + Math.random() * kind.ranged.rate : 0,
       strafe: Math.random() < .5 ? -1 : 1, fuse: 0, fuseMax: kind.exploder?.fuse || 0,
-      elite, tokenBonus: elite ? Math.max(1, Math.ceil(kind.xp * .75)) : 0, contactBonus: elite ? 5 : 0
+      elite, tokenBonus: elite ? Math.max(1, Math.ceil(kind.xp * .75)) : 0, contactBonus: elite ? 5 : 0, dead: false
     });
   }
 
@@ -300,7 +307,7 @@
       x: width / 2, y: -80, kind: bossKind, r: bossKind.size,
       hp: bossKind.hp * hpScale, maxHp: bossKind.hp * hpScale,
       speed: 0, hit: 0, auraTick: 0, angle: 0, attackClock: 1.1,
-      burstClock: 4.2, summonClock: 6, tauntClock: 5.5, lastTaunt: -1, entrance: 0
+      burstClock: 4.2, summonClock: 6, tauntClock: 5.5, lastTaunt: -1, entrance: 0, dead: false
     };
     game.boss = boss;
     game.activeBoss = boss;
@@ -328,7 +335,7 @@
       hp: kind.hp * progressScale, maxHp: kind.hp * progressScale,
       speed: kind.speed, hit: 0, auraTick: 0, angle: 0, scheduleIndex,
       attackClock: kind.ranged ? .8 + Math.random() * kind.ranged.rate : 0,
-      strafe: Math.random() < .5 ? -1 : 1, fuse: 0, fuseMax: 0
+      strafe: Math.random() < .5 ? -1 : 1, fuse: 0, fuseMax: 0, dead: false
     };
     game.activeBoss = miniBoss;
     game.enemies.push(miniBoss);
@@ -354,6 +361,7 @@
   function nearestEnemy() {
     let best = null, bestDistance = Infinity;
     for (const enemy of game.enemies) {
+      if (enemy.dead) continue;
       const dx = enemy.x - game.player.x, dy = enemy.y - game.player.y;
       const distance = dx * dx + dy * dy;
       if (distance < bestDistance) { bestDistance = distance; best = enemy; }
@@ -438,6 +446,7 @@
   }
 
   function damageEnemy(enemy, amount, critical = false, criticalText = "灵光一现!") {
+    if (enemy.dead) return;
     enemy.hp -= amount;
     enemy.hit = .08;
     burst(enemy.x, enemy.y, enemy.kind.color, critical ? 7 : 3, critical ? 130 : 75);
@@ -446,8 +455,10 @@
   }
 
   function killEnemy(enemy) {
+    if (enemy.dead) return;
     const index = game.enemies.indexOf(enemy);
     if (index < 0) return;
+    enemy.dead = true;
     game.enemies.splice(index, 1);
     game.kills += 1;
     if (game.kills >= 200) unlockAchievement("solve_200");
@@ -592,14 +603,42 @@
   }
 
   function burst(x, y, color, count, force) {
-    for (let i = 0; i < count; i++) {
+    const available = Math.max(0, MAX_PARTICLES - game.particles.length);
+    const particleCount = Math.min(count, available);
+    for (let i = 0; i < particleCount; i++) {
       const angle = Math.random() * TAU, speed = Math.random() * force + 20;
       game.particles.push({ x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, r: Math.random() * 2.5 + 1, color, life: Math.random() * .45 + .25 });
     }
   }
 
   function createHazard(x, y, angle, speed, color, radius = 6, damage = 9) {
-    game.hazards.push({ x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, r: radius, damage, color, life: 5, spin: Math.random() * TAU });
+    const hazard = { x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, r: radius, damage, color, life: 5, spin: Math.random() * TAU };
+    if (game.hazards.length < MAX_HAZARDS) {
+      game.hazards.push(hazard);
+      return;
+    }
+    const index = game.hazardCursor % game.hazards.length;
+    game.hazards[index] = hazard;
+    game.hazardCursor = (index + 1) % MAX_HAZARDS;
+  }
+
+  function rebuildEnemyGrid() {
+    const grid = game.enemyGrid;
+    grid.clear();
+    const columns = Math.ceil((width + ENEMY_GRID_SIZE * 2) / ENEMY_GRID_SIZE) + 1;
+    game.gridColumns = columns;
+    for (const enemy of game.enemies) {
+      if (enemy.dead) continue;
+      const cellX = Math.floor((enemy.x + ENEMY_GRID_SIZE) / ENEMY_GRID_SIZE);
+      const cellY = Math.floor((enemy.y + ENEMY_GRID_SIZE) / ENEMY_GRID_SIZE);
+      const key = cellX + cellY * columns;
+      let bucket = grid.get(key);
+      if (!bucket) {
+        bucket = [];
+        grid.set(key, bucket);
+      }
+      bucket.push(enemy);
+    }
   }
 
   function fireEnemyVolley(enemy, player) {
@@ -614,12 +653,17 @@
       createHazard(enemy.x, enemy.y, base + offset, ranged.speed * (1 + progress * .12), enemy.kind.color, enemy.kind.isMiniBoss ? 7 : 5.5, ranged.damage);
     }
     burst(enemy.x, enemy.y, enemy.kind.color, enemy.kind.isMiniBoss ? 10 : 5, 90);
-    beep(enemy.kind.isMiniBoss ? 125 : 190, .06, .018, "square");
+    if (game.enemySoundClock <= 0) {
+      game.enemySoundClock = .09;
+      beep(enemy.kind.isMiniBoss ? 125 : 190, .06, .018, "square");
+    }
   }
 
   function detonateEnemy(enemy, player) {
+    if (enemy.dead) return;
     const index = game.enemies.indexOf(enemy);
     if (index < 0) return;
+    enemy.dead = true;
     game.enemies.splice(index, 1);
     const blast = enemy.kind.exploder;
     const progress = game.time / GAME_DURATION;
@@ -756,6 +800,8 @@
     game.dodgeFlash = Math.max(0, game.dodgeFlash - dt);
     p.perfectCritTime = Math.max(0, p.perfectCritTime - dt);
     p.coffeeRush = Math.max(0, p.coffeeRush - dt);
+    game.enemySoundClock = Math.max(0, game.enemySoundClock - dt);
+    game.pickupSoundClock = Math.max(0, game.pickupSoundClock - dt);
     if (game.combo > 0) {
       game.comboTimer -= dt;
       if (game.comboTimer <= 0) resetCombo();
@@ -811,14 +857,31 @@
     p.fireClock -= dt;
     if (p.fireClock <= 0 && game.enemies.length) { p.fireClock = p.fireRate / (1 + comboFireBonus()); fire(); }
 
+    rebuildEnemyGrid();
     for (let i = game.bullets.length - 1; i >= 0; i--) {
       const bullet = game.bullets[i];
       bullet.x += bullet.vx * dt; bullet.y += bullet.vy * dt; bullet.life -= dt;
       let remove = bullet.life <= 0;
-      for (const enemy of [...game.enemies]) {
-        if (Math.hypot(bullet.x - enemy.x, bullet.y - enemy.y) < bullet.r + enemy.r) {
-          damageEnemy(enemy, bullet.damage, bullet.critical);
-          if (bullet.hits-- <= 0) { remove = true; break; }
+      const cellX = Math.floor((bullet.x + ENEMY_GRID_SIZE) / ENEMY_GRID_SIZE);
+      const cellY = Math.floor((bullet.y + ENEMY_GRID_SIZE) / ENEMY_GRID_SIZE);
+      const cellRadius = Math.max(1, Math.ceil((bullet.r + bossKind.size) / ENEMY_GRID_SIZE));
+      collisionSearch:
+      for (let gridY = cellY - cellRadius; gridY <= cellY + cellRadius; gridY++) {
+        for (let gridX = cellX - cellRadius; gridX <= cellX + cellRadius; gridX++) {
+          const bucket = game.enemyGrid.get(gridX + gridY * game.gridColumns);
+          if (!bucket) continue;
+          for (const enemy of bucket) {
+            if (enemy.dead) continue;
+            const hitX = bullet.x - enemy.x, hitY = bullet.y - enemy.y;
+            const hitRadius = bullet.r + enemy.r;
+            if (hitX * hitX + hitY * hitY < hitRadius * hitRadius) {
+              damageEnemy(enemy, bullet.damage, bullet.critical);
+              if (bullet.hits-- <= 0) {
+                remove = true;
+                break collisionSearch;
+              }
+            }
+          }
         }
       }
       if (remove) game.bullets.splice(i, 1);
@@ -828,13 +891,16 @@
       const hazard = game.hazards[i];
       hazard.x += hazard.vx * worldDt; hazard.y += hazard.vy * worldDt; hazard.life -= worldDt; hazard.spin += worldDt * 4;
       const outside = hazard.x < -50 || hazard.x > width + 50 || hazard.y < -50 || hazard.y > height + 50;
-      if (Math.hypot(hazard.x - p.x, hazard.y - p.y) < hazard.r + p.r) {
+      const hazardX = hazard.x - p.x, hazardY = hazard.y - p.y, hazardRadius = hazard.r + p.r;
+      if (hazardX * hazardX + hazardY * hazardY < hazardRadius * hazardRadius) {
         damagePlayer(hazard.damage, hazard.x, hazard.y);
         game.hazards.splice(i, 1);
       } else if (hazard.life <= 0 || outside) game.hazards.splice(i, 1);
     }
 
-    for (const enemy of [...game.enemies]) {
+    const enemiesSnapshot = game.enemies.slice();
+    for (const enemy of enemiesSnapshot) {
+      if (enemy.dead) continue;
       if (enemy.kind.isBoss) {
         updateBoss(enemy, worldDt, p);
         continue;
@@ -883,7 +949,7 @@
         enemy.auraTick = .42;
         applyAuraDamage(enemy, p);
       }
-      if (!game.enemies.includes(enemy)) continue;
+      if (enemy.dead) continue;
       if (distance < p.r + enemy.r && p.invincible <= 0) {
         damagePlayer(8 + enemy.kind.xp * 1.5 + game.time / GAME_DURATION * 5 + (enemy.contactBonus || 0), enemy.x, enemy.y);
         enemy.x -= ex / distance * 24; enemy.y -= ey / distance * 24;
@@ -910,7 +976,10 @@
           glow: "#48e7ff"
         });
         game.pickups.splice(i, 1);
-        beep(650, .025, .012, "sine");
+        if (game.pickupSoundClock <= 0) {
+          game.pickupSoundClock = .06;
+          beep(650, .025, .012, "sine");
+        }
       }
       else if (orb.life <= 0) game.pickups.splice(i, 1);
     }
@@ -922,6 +991,8 @@
   function updateEffects(dt) {
     game.shake = Math.max(0, game.shake - dt * 30);
     game.flash = Math.max(0, game.flash - dt);
+    if (game.texts.length > MAX_TEXTS) game.texts.splice(0, game.texts.length - MAX_TEXTS);
+    if (game.pickups.length > MAX_PICKUPS) game.pickups.splice(0, game.pickups.length - MAX_PICKUPS);
     for (let i = game.particles.length - 1; i >= 0; i--) {
       const particle = game.particles[i];
       particle.x += particle.vx * dt; particle.y += particle.vy * dt;
@@ -1083,6 +1154,7 @@
   }
 
   function drawEnemies() {
+    const denseEnemies = game.enemies.length > 75;
     for (const enemy of game.enemies) {
       if (enemy.kind.isBoss) {
         drawBoss(enemy);
@@ -1116,7 +1188,7 @@
         ctx.arc(0, 0, enemy.r + 13, -.5 * Math.PI, (-.5 + fuseProgress * 2) * Math.PI);
         ctx.stroke();
       }
-      ctx.shadowBlur = enemy.hit > 0 ? 20 : enemy.kind.isMiniBoss || enemy.elite ? 18 : 10;
+      ctx.shadowBlur = enemy.hit > 0 ? (denseEnemies ? 8 : 20) : denseEnemies ? 0 : enemy.kind.isMiniBoss || enemy.elite ? 18 : 10;
       ctx.shadowColor = enemy.hit > 0 ? "#ffffff" : enemy.elite ? "#ffe66d" : enemy.kind.color;
       ctx.fillStyle = "rgba(7, 10, 22, .9)";
       ctx.strokeStyle = enemy.hit > 0 ? "#ffffff" : enemy.elite ? "#ffe66d" : enemy.kind.color;
@@ -1223,30 +1295,54 @@
   }
 
   function drawHazards() {
-    for (const hazard of game.hazards) {
-      ctx.save(); ctx.translate(hazard.x, hazard.y); ctx.rotate(hazard.spin);
-      ctx.shadowBlur = 18; ctx.shadowColor = hazard.color; ctx.strokeStyle = hazard.color; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(-hazard.r, -hazard.r); ctx.lineTo(hazard.r, hazard.r); ctx.moveTo(hazard.r, -hazard.r); ctx.lineTo(-hazard.r, hazard.r); ctx.stroke();
-      ctx.restore();
+    const dense = game.hazards.length > 180;
+    ctx.lineWidth = 2;
+    for (const color of HAZARD_COLORS) {
+      ctx.strokeStyle = color;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = dense ? 0 : 9;
+      ctx.beginPath();
+      for (const hazard of game.hazards) {
+        if (hazard.color !== color) continue;
+        const cosine = Math.cos(hazard.spin), sine = Math.sin(hazard.spin), radius = hazard.r;
+        const firstX = (cosine - sine) * radius, firstY = (sine + cosine) * radius;
+        const secondX = (cosine + sine) * radius, secondY = (sine - cosine) * radius;
+        ctx.moveTo(hazard.x - firstX, hazard.y - firstY);
+        ctx.lineTo(hazard.x + firstX, hazard.y + firstY);
+        ctx.moveTo(hazard.x - secondX, hazard.y - secondY);
+        ctx.lineTo(hazard.x + secondX, hazard.y + secondY);
+      }
+      ctx.stroke();
     }
     ctx.shadowBlur = 0;
   }
 
   function drawBullets() {
-    for (const bullet of game.bullets) {
-      ctx.shadowBlur = 14; ctx.shadowColor = bullet.critical ? "#ffe66d" : "#48e7ff";
-      ctx.fillStyle = bullet.critical ? "#ffe66d" : "#eef8ff";
-      ctx.beginPath(); ctx.arc(bullet.x, bullet.y, bullet.r, 0, TAU); ctx.fill();
+    for (const critical of [false, true]) {
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = critical ? "#ffe66d" : "#48e7ff";
+      ctx.fillStyle = critical ? "#ffe66d" : "#eef8ff";
+      ctx.beginPath();
+      for (const bullet of game.bullets) {
+        if (bullet.critical !== critical) continue;
+        ctx.moveTo(bullet.x + bullet.r, bullet.y);
+        ctx.arc(bullet.x, bullet.y, bullet.r, 0, TAU);
+      }
+      ctx.fill();
     }
     ctx.shadowBlur = 0;
   }
 
   function drawPickups() {
+    ctx.shadowBlur = 10; ctx.shadowColor = "#3f8cff"; ctx.fillStyle = "#74dfff";
+    ctx.beginPath();
     for (const orb of game.pickups) {
       const pulse = 1 + Math.sin(game.time * 7 + orb.x) * .18;
-      ctx.shadowBlur = 12; ctx.shadowColor = "#3f8cff"; ctx.fillStyle = "#74dfff";
-      ctx.beginPath(); ctx.arc(orb.x, orb.y, orb.r * pulse, 0, TAU); ctx.fill();
+      const radius = orb.r * pulse;
+      ctx.moveTo(orb.x + radius, orb.y);
+      ctx.arc(orb.x, orb.y, radius, 0, TAU);
     }
+    ctx.fill();
     ctx.shadowBlur = 0;
   }
 
