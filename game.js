@@ -21,7 +21,10 @@
     upgradeKicker: $("#upgradeKicker"), upgradeTitle: $("#upgradeTitle"), refreshUpgrades: $("#refreshUpgradesButton"),
     bossHud: $("#bossHud"), bossBar: $("#bossHealthBar"), bossAlert: $("#bossAlert"),
     bossHudKicker: $("#bossHudKicker"), bossHudName: $("#bossHudName"),
-    bossAlertKicker: $("#bossAlertKicker"), bossAlertName: $("#bossAlertName"), bossAlertQuote: $("#bossAlertQuote")
+    bossAlertKicker: $("#bossAlertKicker"), bossAlertName: $("#bossAlertName"), bossAlertQuote: $("#bossAlertQuote"),
+    listenerStatus: $("#listenerStatus"), taskComplete: $("#taskCompleteScreen"),
+    taskCompleteTitle: $("#taskCompleteTitle"), taskCompleteMessage: $("#taskCompleteMessage"),
+    finishForTask: $("#finishForTaskButton"), continueAfterTask: $("#continueAfterTaskButton")
   };
 
   const TAU = Math.PI * 2;
@@ -42,6 +45,9 @@
   let game;
   let audioContext = null;
   let soundOn = true;
+  let taskNoticeReturnState = "start";
+  let taskEventCursor = 0;
+  const baseDocumentTitle = document.title;
 
   const upgrades = [
     { id: "context", icon: "◉", name: "补充上下文", color: "#48e7ff", desc: "上下文场扩大，靠近你的错误持续被解析。", apply: p => { p.aura += 15; p.auraDamage += 5; } },
@@ -239,6 +245,7 @@
   function startGame() {
     game = freshGame();
     state = "playing";
+    document.title = baseDocumentTitle;
     hideAllOverlays();
     ui.pauseButton.textContent = "暂停";
     ui.bossHud.classList.remove("visible");
@@ -260,6 +267,67 @@
     ui.pause.classList.toggle("visible", shouldPause);
     ui.pauseButton.textContent = shouldPause ? "继续" : "暂停";
     lastTime = performance.now();
+  }
+
+  function setListenerState(nextState, label) {
+    ui.listenerStatus.dataset.state = nextState;
+    ui.listenerStatus.querySelector("b").textContent = label;
+  }
+
+  function showTaskComplete(event) {
+    const source = typeof event.source === "string" && event.source.trim() ? event.source.trim() : "Code";
+    const summary = typeof event.summary === "string" ? event.summary.trim() : "";
+    if (!ui.taskComplete.classList.contains("visible")) {
+      taskNoticeReturnState = state;
+      state = "task-complete";
+    }
+    ui.taskComplete.dataset.source = source;
+    ui.taskCompleteTitle.textContent = `${source} 任务已完成`;
+    ui.taskCompleteMessage.textContent = summary || "代码已经回来了。现在可以切回工作区检查结果。";
+    ui.taskComplete.classList.add("visible");
+    document.title = `任务完成 · ${baseDocumentTitle}`;
+    if (audioContext) {
+      beep(660, .1, .055, "triangle");
+      setTimeout(() => beep(880, .14, .05, "triangle"), 110);
+    }
+  }
+
+  function continueAfterTask() {
+    ui.taskComplete.classList.remove("visible");
+    state = taskNoticeReturnState;
+    document.title = baseDocumentTitle;
+    lastTime = performance.now();
+  }
+
+  function finishForCompletedTask() {
+    const source = ui.taskComplete.dataset.source || "Code";
+    const p = game.player;
+    state = "ended";
+    hideAllOverlays();
+    ui.bossHud.classList.remove("visible");
+    ui.bossAlert.classList.remove("visible");
+    $("#endKicker").textContent = "VIBE CODING TASK COMPLETE";
+    $("#endTitle").textContent = `${source} 已经完成，回去看看结果。`;
+    $("#endSummary").textContent = "这局等待提前完成了使命。切回工作区检查生成内容，需要继续等待时再开一局。";
+    $("#endStats").innerHTML = `<div><strong>${formatTime(game.time)}</strong><span>等待时间</span></div><div><strong>${game.kills}</strong><span>已解决</span></div><div><strong>${game.maxCombo}</strong><span>最高连杀</span></div><div><strong>${p.level}</strong><span>最终迭代</span></div>`;
+    ui.end.classList.add("visible");
+    document.title = baseDocumentTitle;
+  }
+
+  async function pollTaskEvents() {
+    try {
+      const response = await fetch(`/api/task-events?after=${taskEventCursor}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("Task monitor unavailable");
+      const payload = await response.json();
+      if (!payload || !Array.isArray(payload.events)) throw new Error("Invalid task monitor response");
+      setListenerState("live", "Codex 监听中");
+      for (const event of payload.events) showTaskComplete(event);
+      taskEventCursor = Math.max(taskEventCursor, Number(payload.latest) || 0);
+    } catch (error) {
+      setListenerState("offline", "仅游戏模式");
+    } finally {
+      setTimeout(pollTaskEvents, 1250);
+    }
   }
 
   function enemyHealthScale(time, isMiniBoss = false) {
@@ -1382,6 +1450,10 @@
   window.addEventListener("keydown", event => {
     const key = event.key.toLowerCase();
     if (["w", "a", "s", "d", "r", "arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(key)) event.preventDefault();
+    if (key === "escape" && state === "task-complete") {
+      continueAfterTask();
+      return;
+    }
     if (key === "escape" && state === "achievements") {
       closeAchievements();
       return;
@@ -1398,11 +1470,14 @@
   ui.closeAchievements.addEventListener("click", closeAchievements);
   ui.pauseButton.addEventListener("click", () => togglePause());
   ui.refreshUpgrades.addEventListener("click", refreshUpgradeChoices);
+  ui.finishForTask.addEventListener("click", finishForCompletedTask);
+  ui.continueAfterTask.addEventListener("click", continueAfterTask);
   ui.sound.addEventListener("click", () => { soundOn = !soundOn; ui.sound.textContent = `声音：${soundOn ? "开" : "关"}`; if (soundOn) beep(440); });
 
   resize();
   game = freshGame();
   renderAchievements();
   draw();
+  pollTaskEvents();
   requestAnimationFrame(loop);
 })();
